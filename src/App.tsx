@@ -23,6 +23,7 @@ import {
   FileIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './lib/supabase';
 
 type Screen = 'login' | 'home' | 'processing' | 'success';
 
@@ -31,6 +32,19 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [ofxBlob, setOfxBlob] = useState<Blob | null>(null);
   const [transactionCount, setTransactionCount] = useState(0);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setScreen('home');
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) setScreen('home');
+      else setScreen('login');
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const navigateTo = (newScreen: Screen) => {
     setScreen(newScreen);
@@ -66,7 +80,9 @@ export default function App() {
               >
                 Upload PDF
               </button>
-              <UserCircle className="w-6 h-6 text-on-surface-variant cursor-pointer hover:text-on-surface transition-colors" />
+              <button onClick={() => supabase.auth.signOut()} className="text-on-surface-variant hover:text-error transition-colors flex items-center gap-2 text-sm font-bold">
+                Sair
+              </button>
             </div>
           </div>
         </header>
@@ -118,17 +134,37 @@ export default function App() {
 }
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'laercio' && password === 'laercio') {
-      setError('');
-      onLogin();
-    } else {
-      setError('Credenciais inválidas. Tente laercio/laercio.');
+    setLoading(true);
+    setError('');
+
+    try {
+      if (isSignUp) {
+        const { error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (signUpError) throw signUpError;
+        setError('Conta criada! Verifique seu email se necessário, ou já está logado.');
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) throw signInError;
+        // onAuthStateChange vai mudar a tela automaticamente
+      }
+    } catch (err: any) {
+      setError(err.message || 'Erro de autenticação');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -147,7 +183,9 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-container/20 border border-primary/20 mb-4 shadow-[0_0_20px_rgba(98,0,238,0.2)]">
               <Lock className="text-secondary w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-semibold text-on-surface mb-1">Welcome Back</h1>
+            <h1 className="text-2xl font-semibold text-on-surface mb-1">
+              {isSignUp ? 'Criar Conta' : 'Welcome Back'}
+            </h1>
             <p className="text-sm text-on-surface-variant uppercase tracking-wider font-medium opacity-80">Command your financial data flow</p>
           </div>
 
@@ -163,16 +201,16 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             )}
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-on-surface-variant uppercase tracking-widest block" htmlFor="username">Email or Username</label>
+              <label className="text-xs font-bold text-on-surface-variant uppercase tracking-widest block" htmlFor="email">Email</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 text-outline w-5 h-5" />
                 <input 
-                  type="text" 
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email" 
+                  id="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-[#1E1E22] border border-outline-variant/30 rounded-lg py-3 pl-10 pr-4 text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all"
-                  placeholder="laercio"
+                  placeholder="seu@email.com"
                   required
                 />
               </div>
@@ -204,17 +242,23 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
             <button 
               type="submit"
-              className="w-full py-4 bg-primary-container hover:bg-inverse-primary text-white font-bold rounded-lg shadow-lg shadow-primary-container/20 transition-all flex items-center justify-center gap-2 group active:scale-[0.98]"
+              disabled={loading}
+              className="w-full py-4 bg-primary-container hover:bg-inverse-primary text-white font-bold rounded-lg shadow-lg shadow-primary-container/20 transition-all flex items-center justify-center gap-2 group active:scale-[0.98] disabled:opacity-50"
             >
-              Sign In to Fluxo
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              {loading ? 'Processando...' : (isSignUp ? 'Criar Conta' : 'Sign In to Fluxo')}
+              {!loading && <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
             </button>
           </form>
 
           <div className="mt-8 pt-6 border-t border-outline-variant/20 text-center">
             <p className="text-sm text-on-surface-variant">
-              Don't have an account? 
-              <a href="#" className="text-secondary font-semibold hover:underline ml-1">Create Account</a>
+              {isSignUp ? 'Já tem uma conta?' : 'Don\'t have an account?'}
+              <button 
+                onClick={() => { setIsSignUp(!isSignUp); setError(''); }}
+                className="text-secondary font-semibold hover:underline ml-2"
+              >
+                {isSignUp ? 'Faça Login' : 'Create Account'}
+              </button>
             </p>
           </div>
         </div>
