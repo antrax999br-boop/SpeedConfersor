@@ -451,7 +451,8 @@ function ProcessingScreen({ file, onCancel, onSuccess }: { file: File | null, on
 
       try {
         setInternalProgress(30);
-        const res = await fetch(`http://${window.location.hostname}:3005/api/upload`, {
+        const apiUrl = import.meta.env.DEV ? `http://${window.location.hostname}:3005/api/upload` : '/api/upload';
+        const res = await fetch(apiUrl, {
           method: 'POST',
           body: formData,
         });
