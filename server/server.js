@@ -159,6 +159,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3005;
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+  });
+}
+
+export default app;
