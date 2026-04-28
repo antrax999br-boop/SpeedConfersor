@@ -1,0 +1,164 @@
+
+import express from 'express';
+import cors from 'cors';
+import multer from 'multer';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+// import { createWorker } from 'tesseract.js'; // For future OCR if needed
+import { parseItau } from './parsers/itau.js';
+import { parseBradesco } from './parsers/bradesco.js';
+import { parseNubank } from './parsers/nubank.js';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+});
+
+const generateOFX = (transactions, bankId) => {
+  const dtStart = transactions.length > 0 ? transactions[0].date : '';
+  const dtEnd = transactions.length > 0 ? transactions[transactions.length - 1].date : '';
+  const acctId = '99999999'; // Placeholder
+  const branchId = '0999';
+  
+  let bankName = 'Banco';
+  if (bankId === '341') bankName = 'Itaú Unibanco S.A.';
+  else if (bankId === '237') bankName = 'Banco Bradesco S.A.';
+  else if (bankId === '260') bankName = 'Nu Pagamentos S.A.';
+
+  let ofx = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+
+<OFX>
+<SIGNONMSGSRSV1>
+<SONRS>
+<STATUS>
+<CODE>0</CODE>
+<SEVERITY>INFO</SEVERITY>
+</STATUS>
+<DTSERVER>${dtEnd || '20250101'}235959</DTSERVER>
+<LANGUAGE>POR</LANGUAGE>
+<FI>
+<ORG>${bankName}</ORG>
+<FID>${bankId}</FID>
+</FI>
+</SONRS>
+</SIGNONMSGSRSV1>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<TRNUID>1</TRNUID>
+<STATUS>
+<CODE>0</CODE>
+<SEVERITY>INFO</SEVERITY>
+</STATUS>
+<STMTRS>
+<CURDEF>BRL</CURDEF>
+<BANKACCTFROM>
+<BANKID>${bankId}</BANKID>
+<BRANCHID>${branchId}</BRANCHID>
+<ACCTID>${acctId}</ACCTID>
+<ACCTTYPE>CHECKING</ACCTTYPE>
+</BANKACCTFROM>
+<BANKTRANLIST>
+<DTSTART>${dtStart}</DTSTART>
+<DTEND>${dtEnd}</DTEND>`;
+
+  for (const t of transactions) {
+    ofx += `
+<STMTTRN>
+<TRNTYPE>${t.type}</TRNTYPE>
+<DTPOSTED>${t.date}</DTPOSTED>
+<TRNAMT>${t.amount}</TRNAMT>
+<FITID>${t.id}</FITID>
+<CHECKNUM>${t.id}</CHECKNUM>
+<MEMO>${t.memo}</MEMO>
+</STMTTRN>`;
+  }
+
+  ofx += `
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>0.00</BALAMT>
+<DTASOF>${dtEnd}</DTASOF>
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>`;
+  
+  return ofx.replace(/\n/g, '\r\n');
+};
+
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  console.log('Received request on /api/upload');
+  console.log('File:', req.file);
+  try {
+    if (!req.file) {
+      console.log('No file received');
+      return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+    }
+
+    if (req.file.mimetype !== 'application/pdf') {
+      console.log('Invalid mimetype:', req.file.mimetype);
+      // Just warn, but continue parsing
+      // return res.status(400).json({ error: 'Apenas arquivos PDF são aceitos.' });
+    }
+
+    const dataBuffer = req.file.buffer;
+    let data;
+    try {
+      let pdfParserFunc = typeof pdfParse === 'function' ? pdfParse : (pdfParse.default || pdfParse);
+      data = await pdfParserFunc(dataBuffer);
+    } catch (e) {
+      console.error('PDF Parse Error:', e);
+      return res.status(500).json({ error: 'Erro ao extrair texto do PDF: ' + (e.message || e) });
+    }
+
+    const text = data.text;
+
+    // Simplistic heuristic to determine bank
+    let bankId = '000';
+    let transactions = [];
+
+    if (text.toLowerCase().includes('itaú') || text.toLowerCase().includes('itau')) {
+      bankId = '341';
+      transactions = parseItau(text);
+    } else if (text.toLowerCase().includes('bradesco')) {
+      bankId = '237';
+      transactions = parseBradesco(text);
+    } else if (text.toLowerCase().includes('nubank')) {
+      bankId = '260';
+      transactions = parseNubank(text);
+    } else {
+      // Fallback parser if we can't identify bank
+      bankId = '000';
+      transactions = parseItau(text); // Using Itau as generic fallback for now
+    }
+
+    const ofxContent = generateOFX(transactions, bankId);
+    console.log(`Generated OFX with ${transactions.length} transactions for bank ${bankId}`);
+
+    res.setHeader('Content-Type', 'application/x-ofx');
+    res.setHeader('Content-Disposition', 'attachment; filename="extrato.ofx"');
+    res.send(ofxContent);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro interno ao processar o arquivo.' });
+  }
+});
+
+const PORT = process.env.PORT || 3005;
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
