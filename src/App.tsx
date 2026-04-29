@@ -78,7 +78,7 @@ export default function App() {
                 className="bg-primary-container text-on-primary-container px-4 py-2 rounded-lg font-bold text-sm active:scale-95 transition-all hover:opacity-90 shadow-lg shadow-primary-container/20"
                 onClick={() => navigateTo('home')}
               >
-                Upload PDF
+                Upload Arquivo
               </button>
               <button onClick={() => supabase.auth.signOut()} className="text-on-surface-variant hover:text-error transition-colors flex items-center gap-2 text-sm font-bold">
                 Sair
@@ -317,7 +317,7 @@ function HomeScreen({ onUpload }: { onUpload: (f: File) => void }) {
 
         <div className="relative z-10 space-y-8 max-w-4xl mx-auto">
           <h1 className="text-5xl md:text-6xl font-black text-on-surface leading-tight tracking-tight">
-            Converta <span className="text-secondary">PDF</span> para <span className="text-primary">OFX</span> <br />
+            Converta <span className="text-secondary">Extratos</span> para <span className="text-primary">OFX</span> <br />
             <span className="italic">instantaneamente</span>
           </h1>
           <p className="text-lg text-on-surface-variant max-w-2xl mx-auto leading-relaxed">
@@ -326,7 +326,7 @@ function HomeScreen({ onUpload }: { onUpload: (f: File) => void }) {
 
           <input 
             type="file" 
-            accept="application/pdf" 
+            accept="application/pdf,text/csv,text/plain" 
             className="hidden" 
             ref={fileInputRef} 
             onChange={handleFileChange} 
@@ -342,8 +342,8 @@ function HomeScreen({ onUpload }: { onUpload: (f: File) => void }) {
               <div className="w-20 h-20 bg-surface-container-highest rounded-full flex items-center justify-center mb-6 border border-white/5 shadow-[0_0_30px_rgba(70,245,224,0.1)]">
                 <Upload className="w-10 h-10 text-secondary" />
               </div>
-              <h3 className="text-2xl font-semibold text-on-surface mb-2">Arraste seu PDF aqui ou clique para selecionar</h3>
-              <p className="text-sm text-on-surface-variant font-medium uppercase tracking-widest opacity-60">Arquivos suportados: PDF (Máximo 10MB)</p>
+              <h3 className="text-2xl font-semibold text-on-surface mb-2">Arraste seu arquivo aqui ou clique para selecionar</h3>
+              <p className="text-sm text-on-surface-variant font-medium uppercase tracking-widest opacity-60">Arquivos suportados: PDF, CSV, TXT (Máximo 10MB)</p>
             </div>
           </div>
         </div>
@@ -503,7 +503,7 @@ function ProcessingScreen({ file, onCancel, onSuccess }: { file: File | null, on
             </div>
             
             <h1 className="text-2xl font-bold text-on-surface mb-2">Processando seu arquivo...</h1>
-            <p className="text-on-surface-variant mb-10 opacity-80">Extraindo dados do PDF e formatando para OFX.</p>
+            <p className="text-on-surface-variant mb-10 opacity-80">Extraindo dados e formatando para OFX.</p>
             
             <div className="w-full space-y-4 mb-10">
               {errorMsg ? (

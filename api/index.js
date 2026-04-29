@@ -116,35 +116,39 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 
     const dataBuffer = req.file.buffer;
-    let data;
-    try {
-      let pdfParserFunc = typeof pdfParse === 'function' ? pdfParse : (pdfParse.default || pdfParse);
-      data = await pdfParserFunc(dataBuffer);
-    } catch (e) {
-      console.error('PDF Parse Error:', e);
-      return res.status(500).json({ error: 'Erro ao extrair texto do PDF: ' + (e.message || e) });
+    let text = '';
+    
+    if (req.file.mimetype === 'application/pdf') {
+      try {
+        let pdfParserFunc = typeof pdfParse === 'function' ? pdfParse : (pdfParse.default || pdfParse);
+        const data = await pdfParserFunc(dataBuffer);
+        text = data.text;
+      } catch (e) {
+        console.error('PDF Parse Error:', e);
+        return res.status(500).json({ error: 'Erro ao extrair texto do PDF: ' + (e.message || e) });
+      }
+    } else {
+      // Handle Excel (converted to CSV/Text) or direct Text/CSV uploads
+      text = dataBuffer.toString('utf-8');
     }
 
-    const text = data.text;
-
     // Simplistic heuristic to determine bank
-    let bankId = '000';
+    let bankId = '341'; // Default to Itau for these "corrupted" files
     let transactions = [];
 
-    if (text.toLowerCase().includes('itaú') || text.toLowerCase().includes('itau')) {
-      bankId = '341';
-      transactions = parseItau(text);
-    } else if (text.toLowerCase().includes('bradesco')) {
+    const lowerText = text.toLowerCase();
+    if (lowerText.includes('bradesco')) {
       bankId = '237';
       transactions = parseBradesco(text);
-    } else if (text.toLowerCase().includes('nubank')) {
+    } else if (lowerText.includes('nubank')) {
       bankId = '260';
       transactions = parseNubank(text);
     } else {
-      // Fallback parser if we can't identify bank
-      bankId = '000';
-      transactions = parseItau(text); // Using Itau as generic fallback for now
+      // Default or explicit Itau
+      bankId = '341';
+      transactions = parseItau(text);
     }
+
 
     const ofxContent = generateOFX(transactions, bankId);
     console.log(`Generated OFX with ${transactions.length} transactions for bank ${bankId}`);
