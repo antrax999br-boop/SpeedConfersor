@@ -145,6 +145,22 @@ export const parseItau = (text) => {
   }
 
 
-  return transactions;
+  // Extração de agência e conta
+  let branchId = '0001';
+  let acctId = '99999999';
+
+  const branchMatch = text.match(/(?:Agência|Ag:?)\s*(\d+)/i);
+  if (branchMatch) branchId = branchMatch[1].padStart(4, '0');
+
+  const acctMatch = text.match(/(?:Conta|Cta|C\/C|CC:?)\s*(\d+)(?:-\d)?/i);
+  if (acctMatch) acctId = acctMatch[1];
+
+  return {
+    transactions,
+    bankInfo: {
+      branchId,
+      acctId
+    }
+  };
 };
 

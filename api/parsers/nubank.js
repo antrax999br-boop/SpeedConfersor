@@ -51,5 +51,11 @@ export const parseNubank = (text) => {
       }
     }
   }
-  return transactions;
+  return {
+    transactions,
+    bankInfo: {
+      branchId: '0001',
+      acctId: '99999999'
+    }
+  };
 };

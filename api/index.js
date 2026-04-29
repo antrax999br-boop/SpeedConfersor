@@ -7,6 +7,9 @@ const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 // import { createWorker } from 'tesseract.js'; // For future OCR if needed
 import { parseUniversal } from './parsers/universal.js';
+import { parseItau } from './parsers/itau.js';
+import { parseBradesco } from './parsers/bradesco.js';
+import { parseNubank } from './parsers/nubank.js';
 
 const app = express();
 app.use(cors());
@@ -136,8 +139,19 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     else if (lowerText.includes('santander')) bankId = '033';
     else if (lowerText.includes('itaú') || lowerText.includes('itau')) bankId = '341';
 
-    // Usamos o Universal Parser para todos, pois é o mais robusto para layouts corrompidos
-    const { transactions, bankInfo } = parseUniversal(text);
+    // Seleção do parser apropriado
+    let result;
+    if (bankId === '237') {
+      result = parseBradesco(text);
+    } else if (bankId === '341') {
+      result = parseItau(text);
+    } else if (bankId === '260') {
+      result = parseNubank(text);
+    } else {
+      result = parseUniversal(text);
+    }
+
+    const { transactions, bankInfo } = result;
 
     if (transactions.length === 0) {
       return res.status(400).json({ error: 'Não foi possível extrair nenhuma transação deste arquivo. Verifique se o formato é suportado.' });
