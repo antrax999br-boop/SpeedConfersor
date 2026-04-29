@@ -1,8 +1,8 @@
 
 const monthsMap = {
-  'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04',
-  'maio': '05', 'junho': '06', 'julho': '07', 'agosto': '08',
-  'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
+  'janeiro': '01', 'fevereiro': '02', 'março': '03', 'marco': '03',
+  'abril': '04', 'maio': '05', 'junho': '06', 'julho': '07',
+  'agosto': '08', 'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
 };
 
 const fixEncoding = (text) => {
@@ -34,12 +34,10 @@ export const parseUniversal = (text) => {
   let currentYear = new Date().getFullYear().toString();
   let lastValidDate = null;
 
-  // Regex para valores monetários (com ou sem R$)
-  const valueRegex = /(?:-?\s*R\$\s*)?(\d+(?:\.\d{3})*,\d{2}-?)/gi;
-  // Regex para datas padrão (DD/MM/YYYY)
+  // Regex mais flexível para capturar valores com ou sem R$ e sinais
+  const valueRegex = /(?:-?\s*R\$\s*)?(-?\d+(?:\.\d{3})*,\d{2}-?)/gi;
   const dateRegexStandard = /(\d{2}\/\d{2}(?:\/\d{4})?)/g;
-  // Regex para datas extensas (6 de Janeiro de 2025)
-  const dateRegexExtensive = /(\d{1,2})\s+de\s+(janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+(\d{4})/gi;
+  const dateRegexExtensive = /(\d{1,2})\s+de\s+([a-zçáéíóúA-ZÇÁÉÍÓÚ]+)\s+de\s+(\d{4})/gi;
 
   for (let line of lines) {
     line = line.trim();
@@ -47,14 +45,14 @@ export const parseUniversal = (text) => {
 
     const lowerLine = line.toLowerCase();
     
-    // 1. Tentar encontrar data extensa (Cabeçalho de data no Inter)
+    // 1. Tentar encontrar data extensa (Cabeçalho Inter)
     const extensiveMatch = [...line.matchAll(dateRegexExtensive)];
     if (extensiveMatch.length > 0) {
       const [full, day, monthName, year] = extensiveMatch[0];
-      const month = monthsMap[monthName.toLowerCase()];
+      const month = monthsMap[monthName.toLowerCase().trim()];
       if (month) {
         lastValidDate = `${year}${month}${day.padStart(2, '0')}`;
-        // Se a linha tem data mas não tem valor, pulamos para a próxima, salvando a data
+        // Se a linha tem data mas não tem valor de transação, pulamos
         if (!line.match(valueRegex)) continue;
       }
     }
@@ -65,10 +63,11 @@ export const parseUniversal = (text) => {
       let rawDate = standardMatch[0][1];
       if (rawDate.length === 5) rawDate += '/' + currentYear;
       const parts = rawDate.split('/');
-      lastValidDate = `${parts[2]}${parts[1]}${parts[0]}`;
+      if (parts.length === 3) {
+        lastValidDate = `${parts[2]}${parts[1]}${parts[0]}`;
+      }
     }
 
-    // Se não temos data ainda, não podemos processar transação
     if (!lastValidDate) continue;
 
     // 3. Encontrar valores
@@ -76,7 +75,6 @@ export const parseUniversal = (text) => {
     let vMatch;
     valueRegex.lastIndex = 0;
     while ((vMatch = valueRegex.exec(line)) !== null) {
-      // O valor real está no grupo 1 da regex
       valuesFound.push({ 
         fullMatch: vMatch[0], 
         valueStr: vMatch[1], 
@@ -86,35 +84,34 @@ export const parseUniversal = (text) => {
 
     if (valuesFound.length === 0) continue;
 
-    // Filtros de lixo (se a linha tem valor mas é claramente saldo/total)
-    if (lowerLine.startsWith('saldo') && line.length < 50) continue;
-    if (lowerLine.includes('total do dia') || lowerLine.includes('saldo do dia')) continue;
+    // Filtros de saldo: se a linha contiver saldo e houver múltiplos valores, o primeiro é a transação
+    const isInterBalanceLine = lowerLine.includes('saldo do dia') || lowerLine.includes('saldo por transação') || lowerLine.includes('saldo dispon');
+    const countToProcess = (isInterBalanceLine && valuesFound.length > 1) ? 1 : valuesFound.length;
 
-    for (let i = 0; i < valuesFound.length; i++) {
+    for (let i = 0; i < countToProcess; i++) {
       const { fullMatch, valueStr, index } = valuesFound[i];
       
-      // Extrair descrição
-      const prevEnd = i === 0 ? 0 : (valuesFound[i-1].index + valuesFound[i-1].fullMatch.length);
-      let desc = line.substring(prevEnd, index).trim();
-
-      // Limpeza profunda
-      desc = desc.replace(dateRegexStandard, '');
+      // Descrição é o que vem antes do valor
+      let desc = line.substring(0, index).trim();
+      
+      // Limpeza profunda da descrição
       desc = desc.replace(dateRegexExtensive, '');
+      desc = desc.replace(dateRegexStandard, '');
       desc = desc.replace(/[<>|*_#]/g, '');
       desc = desc.replace(/R\$/g, '');
+      desc = desc.replace(/Saldo do dia:?/gi, '');
       desc = desc.replace(/\s+/g, ' ').trim();
       
       if (!desc || desc.length < 2) {
-        // Se a descrição antes do valor falhou, tenta pegar o que sobrou da linha
-        desc = line.replace(fullMatch, '').replace(dateRegexStandard, '').replace(dateRegexExtensive, '').trim();
+        // Fallback: pega o resto da linha removendo o valor
+        desc = line.replace(fullMatch, '').replace(dateRegexExtensive, '').trim();
       }
       
-      if (!desc || desc.length < 2) desc = 'TRANSACAO';
+      if (!desc) desc = 'TRANSACAO';
 
       // Conversão de valor
       let cleanValue = valueStr;
       let isNeg = fullMatch.includes('-');
-      
       if (cleanValue.endsWith('-')) { isNeg = true; cleanValue = cleanValue.slice(0, -1); }
       
       cleanValue = cleanValue.replace(/\./g, '').replace(',', '.');
@@ -138,4 +135,5 @@ export const parseUniversal = (text) => {
 
   return transactions;
 };
+
 
