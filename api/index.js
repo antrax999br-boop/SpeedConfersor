@@ -155,21 +155,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-
-
-    const ofxContent = generateOFX(transactions, bankId);
-    console.log(`Generated OFX with ${transactions.length} transactions for bank ${bankId}`);
-
-    res.setHeader('Content-Type', 'application/x-ofx');
-    res.setHeader('Content-Disposition', 'attachment; filename="extrato.ofx"');
-    res.send(ofxContent);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Erro interno ao processar o arquivo.' });
-  }
-});
-
 const PORT = process.env.PORT || 3005;
+
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
