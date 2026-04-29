@@ -33,6 +33,16 @@ export const parseUniversal = (text) => {
   
   let currentYear = new Date().getFullYear().toString();
   let lastValidDate = null;
+  
+  // Extração de agência e conta
+  let branchId = '0001';
+  let acctId = '99999999';
+
+  const branchMatch = text.match(/(?:Agência|Ag\.|Ag):?\s*(\d+)(?:-\d)?/i);
+  if (branchMatch) branchId = branchMatch[1].padStart(4, '0');
+
+  const acctMatch = text.match(/(?:Conta|Cta|C\/C):?\s*(\d+)(?:-\d)?/i);
+  if (acctMatch) acctId = acctMatch[1];
 
   // Regex mais flexível para capturar valores com ou sem R$ e sinais
   const valueRegex = /(?:-?\s*R\$\s*)?(-?\d+(?:\.\d{3})*,\d{2}-?)/gi;
@@ -141,7 +151,11 @@ export const parseUniversal = (text) => {
   }
 
 
-  return transactions;
+  return {
+    transactions,
+    bankInfo: {
+      branchId,
+      acctId
+    }
+  };
 };
-
-

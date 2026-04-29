@@ -17,11 +17,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
-const generateOFX = (transactions, bankId) => {
+const generateOFX = (transactions, bankId, branchId = '0001', acctId = '99999999') => {
   const dtStart = transactions.length > 0 ? transactions[0].date : '';
   const dtEnd = transactions.length > 0 ? transactions[transactions.length - 1].date : '';
-  const acctId = '99999999'; // Placeholder
-  const branchId = '0001';
+
   
   let bankName = 'Banco';
   if (bankId === '341') bankName = 'Itaú Unibanco S.A.';
@@ -138,13 +137,13 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     else if (lowerText.includes('itaú') || lowerText.includes('itau')) bankId = '341';
 
     // Usamos o Universal Parser para todos, pois é o mais robusto para layouts corrompidos
-    const transactions = parseUniversal(text);
+    const { transactions, bankInfo } = parseUniversal(text);
 
     if (transactions.length === 0) {
       return res.status(400).json({ error: 'Não foi possível extrair nenhuma transação deste arquivo. Verifique se o formato é suportado.' });
     }
 
-    const ofxContent = generateOFX(transactions, bankId);
+    const ofxContent = generateOFX(transactions, bankId, bankInfo.branchId, bankInfo.acctId);
     
     res.setHeader('Content-Type', 'application/x-ofx');
     res.setHeader('Content-Disposition', 'attachment; filename="extrato.ofx"');
