@@ -52,6 +52,8 @@ export const parseUniversal = (text) => {
       const month = monthsMap[monthName.toLowerCase().trim()];
       if (month) {
         lastValidDate = `${year}${month}${day.padStart(2, '0')}`;
+        // Se a linha for apenas um cabeçalho de saldo, ignoramos os valores dela
+        if (lowerLine.includes('saldo do dia') || lowerLine.includes('saldo da conta')) continue;
         // Se a linha tem data mas não tem valor de transação, pulamos
         if (!line.match(valueRegex)) continue;
       }
@@ -84,9 +86,14 @@ export const parseUniversal = (text) => {
 
     if (valuesFound.length === 0) continue;
 
-    // Filtros de saldo: se a linha contiver saldo e houver múltiplos valores, o primeiro é a transação
-    const isInterBalanceLine = lowerLine.includes('saldo do dia') || lowerLine.includes('saldo por transação') || lowerLine.includes('saldo dispon');
-    const countToProcess = (isInterBalanceLine && valuesFound.length > 1) ? 1 : valuesFound.length;
+    // Filtros de saldo: IGNORAR completamente linhas de saldo ou totais
+    if (lowerLine.includes('saldo do dia') || lowerLine.includes('saldo por transação') || lowerLine.includes('saldo disponível') || lowerLine.includes('saldo anterior') || lowerLine.includes('saldo atual')) continue;
+    if (lowerLine.includes('total do dia') || lowerLine.includes('total de débitos') || lowerLine.includes('total de créditos')) continue;
+
+    // Se a linha começar com "saldo" e for curta, ignorar
+    if (lowerLine.startsWith('saldo') && line.length < 60) continue;
+
+    const countToProcess = valuesFound.length;
 
     for (let i = 0; i < countToProcess; i++) {
       const { fullMatch, valueStr, index } = valuesFound[i];
@@ -127,11 +134,12 @@ export const parseUniversal = (text) => {
         type: num < 0 ? 'DEBIT' : 'CREDIT',
         amount: num.toFixed(2),
         name: desc.substring(0, 32).toUpperCase().trim(),
-        memo: '',
+        memo: desc.toUpperCase().trim(), // Contimatic usa o MEMO para a descrição/histórico
         id: fitid
       });
     }
   }
+
 
   return transactions;
 };
