@@ -572,7 +572,7 @@ function SuccessScreen({ ofxBlob, file, transactionCount, onReset }: { ofxBlob: 
     const url = URL.createObjectURL(ofxBlob);
     const a = document.createElement('a');
     a.href = url;
-    const fileName = file?.name ? file.name.replace('.pdf', '.ofx') : 'extrato.ofx';
+    const fileName = file?.name ? file.name.replace(/\.[^/.]+$/, "") + ".ofx" : 'extrato.ofx';
     a.download = fileName;
     document.body.appendChild(a);
     a.click();
@@ -601,7 +601,7 @@ function SuccessScreen({ ofxBlob, file, transactionCount, onReset }: { ofxBlob: 
           </h1>
           
           <p className="text-lg text-on-surface-variant mb-12 max-w-md">
-            Seu arquivo <span className="text-secondary font-mono bg-secondary/5 px-2 py-0.5 rounded border border-secondary/20">extrato_setembro.ofx</span> está pronto.
+            Seu arquivo <span className="text-secondary font-mono bg-secondary/5 px-2 py-0.5 rounded border border-secondary/20">{file?.name.replace(/\.[^/.]+$/, "") || 'extrato'}.ofx</span> está pronto.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
