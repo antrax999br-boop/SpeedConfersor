@@ -96,14 +96,9 @@ export const parseUniversal = (text) => {
 
     if (valuesFound.length === 0) continue;
 
-    // Filtros de saldo: IGNORAR completamente linhas de saldo ou totais
-    if (lowerLine.includes('saldo do dia') || lowerLine.includes('saldo por transação') || lowerLine.includes('saldo disponível') || lowerLine.includes('saldo anterior') || lowerLine.includes('saldo atual')) continue;
-    if (lowerLine.includes('total do dia') || lowerLine.includes('total de débitos') || lowerLine.includes('total de créditos')) continue;
-
-    // Se a linha começar com "saldo" e for curta, ignorar
-    if (lowerLine.startsWith('saldo') && line.length < 60) continue;
-
-    const countToProcess = valuesFound.length;
+    // Se a linha tiver múltiplos valores (comum no Inter: [Desc] [Valor] [Saldo]), 
+    // pegamos apenas o primeiro, que é a transação real.
+    const countToProcess = 1; 
 
     for (let i = 0; i < countToProcess; i++) {
       const { fullMatch, valueStr, index } = valuesFound[i];
@@ -111,20 +106,37 @@ export const parseUniversal = (text) => {
       // Descrição é o que vem antes do valor
       let desc = line.substring(0, index).trim();
       
-      // Limpeza profunda da descrição
+      // Limpeza profunda da descrição: remover QUALQUER padrão de data ou valor que sobrou
       desc = desc.replace(dateRegexExtensive, '');
       desc = desc.replace(dateRegexStandard, '');
-      desc = desc.replace(/[<>|*_#]/g, '');
+      desc = desc.replace(valueRegex, ''); // Remove outros valores que possam estar na descrição
       desc = desc.replace(/R\$/g, '');
+      desc = desc.replace(/[-.\d]+,\d{2}-?/g, ''); // Remove valores formatados residuais
+      desc = desc.replace(/[<>|*_#]/g, '');
       desc = desc.replace(/Saldo do dia:?/gi, '');
       desc = desc.replace(/\s+/g, ' ').trim();
       
-      if (!desc || desc.length < 2) {
-        // Fallback: pega o resto da linha removendo o valor
-        desc = line.replace(fullMatch, '').replace(dateRegexExtensive, '').trim();
+      // Se a descrição resultante ainda parecer um valor ou estiver vazia, tenta pegar o que vem DEPOIS do valor
+      if (!desc || desc.length < 2 || /^[-.\d, ]+$/.test(desc)) {
+        desc = line.replace(fullMatch, '')
+                   .replace(dateRegexExtensive, '')
+                   .replace(dateRegexStandard, '')
+                   .replace(valueRegex, '')
+                   .replace(/R\$/g, '')
+                   .trim();
       }
       
-      if (!desc) desc = 'TRANSACAO';
+      // Se ainda assim não tiver descrição válida, pula ou usa um padrão
+      if (!desc || desc.length < 2 || /^[-.\d, ]+$/.test(desc)) {
+          // Se a linha original tinha texto, vamos tentar extrair qualquer palavra
+          const words = line.match(/[a-zA-Z]{3,}/g);
+          desc = words ? words.join(' ') : 'TRANSACAO';
+      }
+
+      if (desc === 'TRANSACAO' && !line.includes('Pix') && !line.includes('Pagamento')) {
+          // Provavelmente é uma linha de saldo disfarçada
+          continue;
+      }
 
       // Conversão de valor
       let cleanValue = valueStr;
@@ -144,11 +156,12 @@ export const parseUniversal = (text) => {
         type: num < 0 ? 'DEBIT' : 'CREDIT',
         amount: num.toFixed(2),
         name: desc.substring(0, 32).toUpperCase().trim(),
-        memo: desc.toUpperCase().trim(), // Contimatic usa o MEMO para a descrição/histórico
+        memo: desc.toUpperCase().trim(),
         id: fitid
       });
     }
   }
+
 
 
   return {
