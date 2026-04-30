@@ -33,16 +33,25 @@ export const parseSantander = (text) => {
     currentYear = yearMatch[1];
   }
 
-  // Extração de agência e conta
+  // Extração de agência e conta (Mais robusta para layouts do Santander)
   let branchId = '0001';
   let acctId = '99999999';
 
-  const branchMatch = text.match(/Agência\s*(\d+)/i);
-  if (branchMatch) branchId = branchMatch[1].padStart(4, '0');
+  // Procura "Agência" seguido de um número (pode ter espaços ou quebras de linha)
+  const branchMatch = text.match(/Agência[\s\S]{1,20}?(\d{1,5})/i);
+  if (branchMatch) {
+    branchId = branchMatch[1].trim().padStart(4, '0');
+  }
 
-  const acctMatch = text.match(/Conta\s+Corrente\s*([\d.]+)-(\d)/i) || text.match(/Conta\s+Corrente\s*(\d+)/i);
+  // Procura "Conta Corrente" seguido de um número com dígito (ex: 13.000006-3)
+  const acctPattern = /Conta\s+Corrente[\s\S]{1,50}?([\d.]+)-(\d)/i;
+  const acctMatch = text.match(acctPattern) || text.match(/Conta\s+Corrente[\s\S]{1,50}?(\d{5,})/i);
+  
   if (acctMatch) {
-    acctId = acctMatch[1].replace(/\./g, '') + (acctMatch[2] ? acctMatch[2] : '');
+    const rawAcct = acctMatch[1].replace(/\./g, '').trim();
+    const digit = acctMatch[2] ? acctMatch[2].trim() : '';
+    // No Santander, o sistema contábil Phoenix costuma esperar Agência + Conta no ACCTID
+    acctId = branchId + rawAcct + digit;
   }
 
   const valueRegex = /(-?\d+(?:\.\d{3})*,\d{2}-?)/g;
