@@ -127,7 +127,7 @@ export const parseSantander = (text) => {
       if (!desc || desc.length < 2 || desc.toUpperCase().includes('SALDO EM')) continue;
 
       // Lógica de Sinais e Prevenção de Notação Científica
-      let cleanValue = valStr;
+      let cleanValue = transactionValueStr;
       
       // Se tiver 'e' ou 'E', é lixo/notação científica, pula
       if (cleanValue.toLowerCase().includes('e')) continue;
