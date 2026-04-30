@@ -25,7 +25,7 @@ export const parseSantander = (text) => {
   const lines = text.split('\n');
   const dateCounts = {};
   
-  // Extração do Nome da Empresa (ORG)
+  // Extração do Nome da Empresa
   let orgName = 'BANCO SANTANDER';
   const nameMatch = text.match(/Nome[\s\S]{1,50}?\n\s*([A-Z0-9].+)/i);
   if (nameMatch) orgName = nameMatch[1].trim().toUpperCase();
@@ -35,7 +35,7 @@ export const parseSantander = (text) => {
   const yearMatch = text.match(/(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\/(202[0-9])/i);
   if (yearMatch) currentYear = yearMatch[1];
 
-  // Extração de agência e conta (Rigorosa)
+  // Identificação de Conta
   let branchId = '4371';
   let acctId = '4371130000063';
   const branchMatch = text.match(/Agência[:\s]*(\d{4,5})/i);
@@ -50,10 +50,10 @@ export const parseSantander = (text) => {
   }
 
   const valueRegex = /(-?\d+(?:\.\d{3})*,\d{2}-?)/g;
-  const dateRegex = /^(\d{2}\/\d{2})\s+/;
+  const dateRegex = /^(\d{2}\/\d{2})\s*/;
 
-  // ESTADOS DO PARSER
-  let state = 'WAITING_FOR_CC';
+  let inCCSection = false;
+  let inMovimentacao = false;
   let lastTransaction = null;
 
   for (let i = 0; i < lines.length; i++) {
@@ -61,31 +61,27 @@ export const parseSantander = (text) => {
     if (!line) continue;
     const upperLine = line.toUpperCase();
 
-    // MÁQUINA DE ESTADOS
-    if (state === 'WAITING_FOR_CC') {
-        if (upperLine.includes('CONTA CORRENTE') && !upperLine.includes('SALDO')) {
-            state = 'WAITING_FOR_MOV';
-        }
+    // 1. Detectar entrada na seção de Conta Corrente
+    if (upperLine.includes('CONTA CORRENTE') && !upperLine.includes('SALDO')) {
+        inCCSection = true;
+    }
+
+    // 2. Detectar entrada na tabela de Movimentação
+    if (inCCSection && upperLine.includes('MOVIMENTAÇÃO') && !upperLine.includes('MENSAL')) {
+        inMovimentacao = true;
+        continue; // Pula o cabeçalho
+    }
+
+    // 3. Detectar saída (Bloqueio de lixo)
+    if (inMovimentacao && (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('ÍNDICES ECONÔMICOS') || upperLine.includes('INVESTIMENTOS'))) {
+        inMovimentacao = false;
+        inCCSection = false;
         continue;
     }
 
-    if (state === 'WAITING_FOR_MOV') {
-        if (upperLine.includes('MOVIMENTAÇÃO') && !upperLine.includes('MENSAL')) {
-            state = 'IN_TRANSACTIONS';
-        }
-        continue;
-    }
-
-    if (state === 'IN_TRANSACTIONS') {
-        // GATILHOS DE PARADA DEFINITIVA
-        if (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('ÍNDICES ECONÔMICOS') || upperLine.includes('INVESTIMENTOS')) {
-            state = 'FINISHED';
-            break;
-        }
-
+    if (inMovimentacao) {
         const dateMatch = line.match(dateRegex);
         if (dateMatch) {
-            // Nova Transação Detectada
             const rawDate = dateMatch[1] + '/' + currentYear;
             const parts = rawDate.split('/');
             const formattedDate = `${parts[2]}${parts[1]}${parts[0]}`;
@@ -96,7 +92,7 @@ export const parseSantander = (text) => {
             if (values.length > 0) {
                 let transactionValueStr = values[0][0];
                 
-                // Proteção contra números gigantes (Notação Científica ou IDs)
+                // Filtro anti-lixo (números gigantes ou notação científica)
                 if (transactionValueStr.toLowerCase().includes('e') || transactionValueStr.replace(/[.,-]/g, '').length > 12) continue;
 
                 let desc = remainingLine.substring(0, values[0].index).trim();
@@ -130,9 +126,9 @@ export const parseSantander = (text) => {
                     transactions.push(lastTransaction);
                 }
             }
-        } else if (lastTransaction) {
-            // É continuação da descrição da transação anterior
-            if (!upperLine.includes('SALDO') && !upperLine.includes('PAGINA') && line.length > 3) {
+        } else if (lastTransaction && !upperLine.includes('SALDO') && !upperLine.includes('PAGINA')) {
+            // Continuação da descrição da transação anterior
+            if (line.length > 3) {
                 lastTransaction.memo = (lastTransaction.memo + ' ' + line.toUpperCase()).trim();
                 lastTransaction.name = lastTransaction.memo.substring(0, 32);
             }
