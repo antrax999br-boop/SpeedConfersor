@@ -126,8 +126,12 @@ export const parseSantander = (text) => {
       desc = desc.replace(/\s+/g, ' ').trim();
       if (!desc || desc.length < 2 || desc.toUpperCase().includes('SALDO EM')) continue;
 
-      // Tratamento de Valor
-      let cleanValue = transactionValueStr;
+      // Lógica de Sinais e Prevenção de Notação Científica
+      let cleanValue = valStr;
+      
+      // Se tiver 'e' ou 'E', é lixo/notação científica, pula
+      if (cleanValue.toLowerCase().includes('e')) continue;
+
       let isNegative = false;
       if (cleanValue.endsWith('-')) { isNegative = true; cleanValue = cleanValue.slice(0, -1); }
       else if (cleanValue.startsWith('-')) { isNegative = true; cleanValue = cleanValue.substring(1); }

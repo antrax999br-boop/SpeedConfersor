@@ -136,9 +136,17 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     
     if (lowerText.includes('bradesco')) bankId = '237';
     else if (lowerText.includes('nubank')) bankId = '260';
-    else if (lowerText.includes('inter')) bankId = '077';
-    else if (lowerText.includes('santander')) bankId = '033';
-    else if (lowerText.includes('itaú') || lowerText.includes('itau')) bankId = '341';
+    else {
+      const upperText = text.toUpperCase();
+
+      if (upperText.includes('SANTANDER') || upperText.includes('033-7')) {
+          bankId = '033';
+      } else if (upperText.includes('BANCO INTER') || upperText.includes('INTERMEDIUM') || (upperText.includes('INTER') && !upperText.includes('INTERNET'))) {
+          bankId = '077';
+      } else if (upperText.includes('ITAÚ') || upperText.includes('ITAU')) {
+          bankId = '341';
+      }
+    }
 
     // Seleção do parser apropriado
     let result;
