@@ -10,6 +10,7 @@ import { parseUniversal } from './parsers/universal.js';
 import { parseItau } from './parsers/itau.js';
 import { parseBradesco } from './parsers/bradesco.js';
 import { parseNubank } from './parsers/nubank.js';
+import { parseSantander } from './parsers/santander.js';
 
 const app = express();
 app.use(cors());
@@ -147,6 +148,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       result = parseItau(text);
     } else if (bankId === '260') {
       result = parseNubank(text);
+    } else if (bankId === '033') {
+      result = parseSantander(text);
     } else {
       result = parseUniversal(text);
     }
