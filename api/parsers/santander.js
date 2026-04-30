@@ -51,7 +51,6 @@ export const parseSantander = (text) => {
   if (acctMatch) {
     const rawAcct = acctMatch[1].replace(/\./g, '').trim();
     const digit = acctMatch[2] ? acctMatch[2].trim() : '';
-    // UNIR AGÊNCIA + CONTA conforme padrão que funcionou
     acctId = branchId + rawAcct + digit;
   }
 
@@ -62,6 +61,7 @@ export const parseSantander = (text) => {
   let inMovimentacao = false;
   let sectionCCFound = false;
   let stopForever = false;
+  let transactionFound = false;
 
   for (let i = 0; i < lines.length; i++) {
     if (stopForever) break;
@@ -70,23 +70,27 @@ export const parseSantander = (text) => {
     if (!line) continue;
     const upperLine = line.toUpperCase();
 
-    // Detectar Seção de Conta Corrente
-    if (upperLine.includes('CONTA CORRENTE')) {
+    // Ignorar explicitamente tabelas de índices
+    if (upperLine.includes('IBOVESPA') || upperLine.includes('IGPM') || upperLine.includes('INCC') || (upperLine.includes('DOLAR') && !upperLine.includes('COMPRA'))) {
+        continue;
+    }
+
+    // Detectar Seção de Conta Corrente (Ignorar se for apenas parte do resumo)
+    if (upperLine.includes('CONTA CORRENTE') && !upperLine.includes('SALDO DE')) {
         sectionCCFound = true;
     }
 
     // Início da Movimentação
-    if (sectionCCFound && upperLine.includes('MOVIMENTAÇÃO')) {
+    if (sectionCCFound && upperLine.includes('MOVIMENTAÇÃO') && !upperLine.includes('MENSAL')) {
       inMovimentacao = true;
       continue;
     }
     
-    // FIM DEFINITIVO
-    if (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('INVESTIMENTOS') || upperLine.includes('ÍNDICES ECONÔMICOS')) {
-      if (inMovimentacao) {
-          inMovimentacao = false;
-          stopForever = true;
-      }
+    // FIM DEFINITIVO (Somente se já tivermos começado a ler transações reais)
+    // Isso evita que a palavra "Investimentos" no Resumo inicial pare o processo.
+    if (transactionFound && (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('INVESTIMENTOS') || upperLine.includes('ÍNDICES ECONÔMICOS'))) {
+      inMovimentacao = false;
+      stopForever = true;
       continue;
     }
 
@@ -126,9 +130,9 @@ export const parseSantander = (text) => {
       // Descrição principal
       let desc = line.substring(0, transactionValueIndex).trim();
       
-      // Capturar Doc (6 dígitos isolados)
+      // Capturar Doc
       let docNumber = '';
-      const docMatch = desc.match(/\b(\d{6})\b/);
+      const docMatch = line.match(/\b(\d{6})\b/);
       if (docMatch) docNumber = docMatch[1];
 
       // Se a descrição for curta ou numérica, busca a próxima linha
@@ -143,7 +147,7 @@ export const parseSantander = (text) => {
       }
 
       desc = desc.replace(/\s+/g, ' ').trim();
-      if (desc === '-' || !desc || desc.length < 2) continue;
+      if (desc === '-' || !desc || desc.length < 2 || desc.toUpperCase().includes('SALDO EM')) continue;
 
       // Tratamento de Valor
       let cleanValue = transactionValueStr;
@@ -157,8 +161,9 @@ export const parseSantander = (text) => {
       if (!isNaN(num) && num !== 0) {
         if (isNegative) num = -num;
 
+        transactionFound = true; // MARCA QUE ACHAMOS UMA TRANSAÇÃO REAL
+
         if (!dateCounts[currentLineDate]) dateCounts[currentLineDate] = 1;
-        // FITID: Data + Sequencial para garantir unicidade
         const fitid = `${currentLineDate}${String(dateCounts[currentLineDate]++).padStart(4, '0')}`;
 
         transactions.push({
