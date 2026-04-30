@@ -25,6 +25,13 @@ export const parseSantander = (text) => {
   const lines = text.split('\n');
   const dateCounts = {};
   
+  // Extração do Nome da Empresa (ORG)
+  let orgName = 'BANCO SANTANDER';
+  const nameMatch = text.match(/Nome[\s\S]{1,50}?\n\s*([A-Z0-9].+)/i);
+  if (nameMatch) {
+    orgName = nameMatch[1].trim().toUpperCase();
+  }
+
   // Extração do Ano
   let currentYear = new Date().getFullYear().toString();
   const yearMatch = text.match(/(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\/(202[0-9])/i);
@@ -33,48 +40,19 @@ export const parseSantander = (text) => {
   }
 
   // Extração de agência e conta (Busca Ultra-Flexível)
-  let branchId = '4371'; // Fallback para o seu caso se tudo falhar, mas vamos tentar extrair
-  let acctId = '4371130000063'; // Fallback para o seu caso
+  let branchId = '0001';
+  let acctId = '99999999';
 
-  // 1. Tentar extrair agência (Procura "Agência", "Ag.", "Loja", etc)
-  const branchPatterns = [
-    /Agência[\s\S]{1,50}?(\d{4,5})/i,
-    /Loja[\s\S]{1,50}?\((\d{4,5})\)/i,
-    /Ag\.?[:\s]*(\d{4,5})/i
-  ];
-  
-  for (const pattern of branchPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      branchId = match[1].trim().padStart(4, '0');
-      break;
-    }
-  }
+  const branchMatch = text.match(/Agência[\s\S]{1,50}?(\d{4,5})/i);
+  if (branchMatch) branchId = branchMatch[1].trim().padStart(4, '0');
 
-  // 2. Tentar extrair conta (Procura "Conta Corrente", "C/C", etc)
-  const acctPatterns = [
-    /Conta\s+Corrente[\s\S]{1,50}?([\d.]+)-(\d)/i,
-    /Conta[\s\S]{1,50}?([\d.]+)-(\d)/i,
-    /C\/C[:\s]*([\d.]+)-(\d)/i,
-    /([\d]{2}\.[\d]{6}-[\d])/ // Padrão direto XX.XXXXXX-X
-  ];
-
-  for (const pattern of acctPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const rawAcct = match[1].replace(/\./g, '').replace('-', '').trim();
-      const digit = match[2] ? match[2].trim() : '';
-      acctId = branchId + rawAcct + digit;
-      break;
-    }
-  }
-
-  // 3. Fallback final: se ainda estiver com o padrão ou falhar, busca qualquer padrão de conta Santander
-  if (acctId.includes('9999')) {
-      const genericMatch = text.match(/(\d{4})\s+(\d{2}\.\d{6}-\d)/);
-      if (genericMatch) {
-          acctId = genericMatch[1] + genericMatch[2].replace(/[.-]/g, '');
-      }
+  const acctPattern = /Conta\s+Corrente[\s\S]{1,50}?([\d.]+)-(\d)/i;
+  const acctMatch = text.match(acctPattern) || text.match(/Conta\s+Corrente[\s\S]{1,50}?(\d{5,})/i);
+  if (acctMatch) {
+    const rawAcct = acctMatch[1].replace(/\./g, '').trim();
+    const digit = acctMatch[2] ? acctMatch[2].trim() : '';
+    // UNIR AGÊNCIA + CONTA conforme padrão que funcionou
+    acctId = branchId + rawAcct + digit;
   }
 
   const valueRegex = /(-?\d+(?:\.\d{3})*,\d{2}-?)/g;
@@ -90,7 +68,6 @@ export const parseSantander = (text) => {
 
     let line = lines[i].trim();
     if (!line) continue;
-
     const upperLine = line.toUpperCase();
 
     // Detectar Seção de Conta Corrente
@@ -98,28 +75,25 @@ export const parseSantander = (text) => {
         sectionCCFound = true;
     }
 
-    // Início da Movimentação (Somente se já achou Conta Corrente e não parou ainda)
+    // Início da Movimentação
     if (sectionCCFound && upperLine.includes('MOVIMENTAÇÃO')) {
       inMovimentacao = true;
       continue;
     }
     
-    // FIM DEFINITIVO da leitura (Investimentos ou Saldos indicam fim da CC)
-    if (upperLine.includes('SALDOS POR PERÍODO') || 
-        upperLine.includes('INVESTIMENTOS') || 
-        upperLine.includes('RESUMO -') ||
-        upperLine.includes('ÍNDICES ECONÔMICOS')) {
+    // FIM DEFINITIVO
+    if (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('INVESTIMENTOS') || upperLine.includes('ÍNDICES ECONÔMICOS')) {
       if (inMovimentacao) {
           inMovimentacao = false;
-          stopForever = true; // Uma vez que saiu da CC, não volta mais
+          stopForever = true;
       }
       continue;
     }
 
     if (!inMovimentacao) continue;
 
-    // Ignorar linhas de saldo e rodapé
-    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO ATUAL') || upperLine.includes('PAGINA:')) {
+    // Ignorar linhas de saldo e metadados
+    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('PAGINA:') || upperLine.includes('PÁGINA:')) {
         const dateSearch = line.match(/(\d{2}\/\d{2})/);
         if (dateSearch) {
             const parts = (dateSearch[1] + '/' + currentYear).split('/');
@@ -149,28 +123,29 @@ export const parseSantander = (text) => {
       let transactionValueStr = values[0][0];
       let transactionValueIndex = values[0].index;
 
-      // Descrição
+      // Descrição principal
       let desc = line.substring(0, transactionValueIndex).trim();
       
-      // Se a descrição for apenas números (Doc), tenta anexar a próxima linha
+      // Capturar Doc (6 dígitos isolados)
+      let docNumber = '';
+      const docMatch = desc.match(/\b(\d{6})\b/);
+      if (docMatch) docNumber = docMatch[1];
+
+      // Se a descrição for curta ou numérica, busca a próxima linha
       if (/^[\d.\-/ ]+$/.test(desc) || desc.length < 3) {
           if (i + 1 < lines.length) {
               const nextLine = lines[i+1].trim();
-              if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex) && nextLine.length > 3) {
+              if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex)) {
                   desc = (desc + ' ' + nextLine).trim();
                   i++;
               }
           }
       }
 
-      // Limpeza de descrição
       desc = desc.replace(/\s+/g, ' ').trim();
-      desc = desc.replace(/\s+\d{6,10}\s*/, ' ').trim();
-      
-      // Se for apenas traços ou vazia, pula
       if (desc === '-' || !desc || desc.length < 2) continue;
 
-      // Conversão do valor
+      // Tratamento de Valor
       let cleanValue = transactionValueStr;
       let isNegative = false;
       if (cleanValue.endsWith('-')) { isNegative = true; cleanValue = cleanValue.slice(0, -1); }
@@ -183,6 +158,7 @@ export const parseSantander = (text) => {
         if (isNegative) num = -num;
 
         if (!dateCounts[currentLineDate]) dateCounts[currentLineDate] = 1;
+        // FITID: Data + Sequencial para garantir unicidade
         const fitid = `${currentLineDate}${String(dateCounts[currentLineDate]++).padStart(4, '0')}`;
 
         transactions.push({
@@ -191,7 +167,8 @@ export const parseSantander = (text) => {
           amount: num.toFixed(2),
           name: desc.substring(0, 32).toUpperCase().trim(),
           memo: desc.toUpperCase().trim(),
-          id: fitid
+          id: fitid,
+          checknum: docNumber
         });
       }
     }
@@ -201,7 +178,8 @@ export const parseSantander = (text) => {
     transactions,
     bankInfo: {
       branchId,
-      acctId
+      acctId,
+      orgName
     }
   };
 };
