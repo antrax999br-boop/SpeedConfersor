@@ -27,30 +27,23 @@ export const parseSantander = (text) => {
   
   // Extração do Ano
   let currentYear = new Date().getFullYear().toString();
-  // Busca por "abril/2025" ou similar
   const yearMatch = text.match(/(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\/(202[0-9])/i);
   if (yearMatch) {
     currentYear = yearMatch[1];
   }
 
-  // Extração de agência e conta (Mais robusta para layouts do Santander)
+  // Extração de agência e conta
   let branchId = '0001';
   let acctId = '99999999';
 
-  // Procura "Agência" seguido de um número (pode ter espaços ou quebras de linha)
   const branchMatch = text.match(/Agência[\s\S]{1,20}?(\d{1,5})/i);
-  if (branchMatch) {
-    branchId = branchMatch[1].trim().padStart(4, '0');
-  }
+  if (branchMatch) branchId = branchMatch[1].trim().padStart(4, '0');
 
-  // Procura "Conta Corrente" seguido de um número com dígito (ex: 13.000006-3)
   const acctPattern = /Conta\s+Corrente[\s\S]{1,50}?([\d.]+)-(\d)/i;
   const acctMatch = text.match(acctPattern) || text.match(/Conta\s+Corrente[\s\S]{1,50}?(\d{5,})/i);
-  
   if (acctMatch) {
     const rawAcct = acctMatch[1].replace(/\./g, '').trim();
     const digit = acctMatch[2] ? acctMatch[2].trim() : '';
-    // No Santander, o sistema contábil Phoenix costuma esperar Agência + Conta no ACCTID
     acctId = branchId + rawAcct + digit;
   }
 
@@ -59,32 +52,44 @@ export const parseSantander = (text) => {
 
   let lastDate = null;
   let inMovimentacao = false;
+  let sectionCCFound = false;
+  let stopForever = false;
 
   for (let i = 0; i < lines.length; i++) {
+    if (stopForever) break;
+
     let line = lines[i].trim();
     if (!line) continue;
 
     const upperLine = line.toUpperCase();
 
-    // Detectar início e fim da seção de movimentação
-    if (upperLine.includes('MOVIMENTAÇÃO')) {
+    // Detectar Seção de Conta Corrente
+    if (upperLine.includes('CONTA CORRENTE')) {
+        sectionCCFound = true;
+    }
+
+    // Início da Movimentação (Somente se já achou Conta Corrente e não parou ainda)
+    if (sectionCCFound && upperLine.includes('MOVIMENTAÇÃO')) {
       inMovimentacao = true;
       continue;
     }
     
-    // Lista de termos que indicam o fim real das transações
+    // FIM DEFINITIVO da leitura (Investimentos ou Saldos indicam fim da CC)
     if (upperLine.includes('SALDOS POR PERÍODO') || 
         upperLine.includes('INVESTIMENTOS') || 
-        upperLine.includes('ÍNDICES ECONÔMICOS') || 
-        upperLine.includes('COMPROVANTES DE PAGAMENTO') ||
-        upperLine.includes('VOCÊ E SEU DINHEIRO')) {
-      inMovimentacao = false;
+        upperLine.includes('RESUMO -') ||
+        upperLine.includes('ÍNDICES ECONÔMICOS')) {
+      if (inMovimentacao) {
+          inMovimentacao = false;
+          stopForever = true; // Uma vez que saiu da CC, não volta mais
+      }
+      continue;
     }
 
     if (!inMovimentacao) continue;
 
-    // Ignorar linhas de saldo (não são transações individuais)
-    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO ATUAL')) {
+    // Ignorar linhas de saldo e rodapé
+    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO ATUAL') || upperLine.includes('PAGINA:')) {
         const dateSearch = line.match(/(\d{2}\/\d{2})/);
         if (dateSearch) {
             const parts = (dateSearch[1] + '/' + currentYear).split('/');
@@ -92,9 +97,6 @@ export const parseSantander = (text) => {
         }
         continue;
     }
-
-    // Ignorar linhas de rodapé ou metadados
-    if (upperLine.includes('PAGINA:') || upperLine.includes('PÁGINA:')) continue;
 
     const dateMatch = line.match(dateRegex);
     let currentLineDate = null;
@@ -111,65 +113,44 @@ export const parseSantander = (text) => {
 
     if (!currentLineDate) continue;
 
-    // Encontrar valores na linha
+    // Capturar valores
     const values = [...line.matchAll(valueRegex)];
-    
     if (values.length > 0) {
-      // O primeiro valor encontrado costuma ser o valor da transação
       let transactionValueStr = values[0][0];
       let transactionValueIndex = values[0].index;
 
-      // Descrição é o que sobrou na linha
+      // Descrição
       let desc = line.substring(0, transactionValueIndex).trim();
       
-      // Se não houver descrição antes do valor, tenta pegar o que vem depois
-      if (!desc && transactions.length > 0) {
-          desc = line.substring(transactionValueIndex + transactionValueStr.length).trim();
-      }
-
-      // Limpeza da descrição
-      desc = desc.replace(/\s+/g, ' ').trim();
-      
-      // Se a descrição for apenas números ou muito curta, pode ser lixo
-      if (/^[\d.\-/ ]+$/.test(desc) && desc.length > 0) {
-          // Se for só número, tenta pegar a próxima linha como descrição se ela não tiver data/valor
+      // Se a descrição for apenas números (Doc), tenta anexar a próxima linha
+      if (/^[\d.\-/ ]+$/.test(desc) || desc.length < 3) {
           if (i + 1 < lines.length) {
               const nextLine = lines[i+1].trim();
-              if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex)) {
-                  desc = nextLine;
+              if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex) && nextLine.length > 3) {
+                  desc = (desc + ' ' + nextLine).trim();
                   i++;
               }
           }
       }
 
-      // Remover número de documento (6-10 dígitos)
+      // Limpeza de descrição
+      desc = desc.replace(/\s+/g, ' ').trim();
       desc = desc.replace(/\s+\d{6,10}\s*/, ' ').trim();
       
-      if (desc === '-' || !desc || desc.length < 2) {
-          const textOnly = line.replace(valueRegex, '').replace(/[0-9]/g, '').replace(/[-.,]/g, '').trim();
-          desc = textOnly || 'TRANSACAO';
-      }
+      // Se for apenas traços ou vazia, pula
+      if (desc === '-' || !desc || desc.length < 2) continue;
 
       // Conversão do valor
       let cleanValue = transactionValueStr;
       let isNegative = false;
-      
-      if (cleanValue.endsWith('-')) {
-        isNegative = true;
-        cleanValue = cleanValue.slice(0, -1);
-      } else if (cleanValue.startsWith('-')) {
-        isNegative = true;
-        cleanValue = cleanValue.substring(1);
-      }
+      if (cleanValue.endsWith('-')) { isNegative = true; cleanValue = cleanValue.slice(0, -1); }
+      else if (cleanValue.startsWith('-')) { isNegative = true; cleanValue = cleanValue.substring(1); }
 
       cleanValue = cleanValue.replace(/\./g, '').replace(',', '.');
       let num = parseFloat(cleanValue);
       
-      if (!isNaN(num)) {
+      if (!isNaN(num) && num !== 0) {
         if (isNegative) num = -num;
-
-        // Filtro adicional: evitar transações de valor zero (comum em quebras de página)
-        if (num === 0) continue;
 
         if (!dateCounts[currentLineDate]) dateCounts[currentLineDate] = 1;
         const fitid = `${currentLineDate}${String(dateCounts[currentLineDate]++).padStart(4, '0')}`;
