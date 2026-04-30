@@ -27,7 +27,8 @@ export const parseSantander = (text) => {
   
   // Extração do Ano
   let currentYear = new Date().getFullYear().toString();
-  const yearMatch = text.match(/\/\s*(202[0-9])/); 
+  // Busca por "abril/2025" ou similar
+  const yearMatch = text.match(/(?:janeiro|fevereiro|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\/(202[0-9])/i);
   if (yearMatch) {
     currentYear = yearMatch[1];
   }
@@ -54,19 +55,27 @@ export const parseSantander = (text) => {
     let line = lines[i].trim();
     if (!line) continue;
 
+    const upperLine = line.toUpperCase();
+
     // Detectar início e fim da seção de movimentação
-    if (line.toUpperCase().includes('MOVIMENTAÇÃO')) {
+    if (upperLine.includes('MOVIMENTAÇÃO')) {
       inMovimentacao = true;
       continue;
     }
-    if (line.toUpperCase().includes('SALDOS POR PERÍODO') || line.toUpperCase().includes('INVESTIMENTOS')) {
+    
+    // Lista de termos que indicam o fim real das transações
+    if (upperLine.includes('SALDOS POR PERÍODO') || 
+        upperLine.includes('INVESTIMENTOS') || 
+        upperLine.includes('ÍNDICES ECONÔMICOS') || 
+        upperLine.includes('COMPROVANTES DE PAGAMENTO') ||
+        upperLine.includes('VOCÊ E SEU DINHEIRO')) {
       inMovimentacao = false;
     }
 
     if (!inMovimentacao) continue;
 
     // Ignorar linhas de saldo (não são transações individuais)
-    if (line.toUpperCase().includes('SALDO EM') || line.toUpperCase().includes('SALDO DO DIA') || line.toUpperCase().includes('SALDO ATUAL')) {
+    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO ATUAL')) {
         const dateSearch = line.match(/(\d{2}\/\d{2})/);
         if (dateSearch) {
             const parts = (dateSearch[1] + '/' + currentYear).split('/');
@@ -74,6 +83,9 @@ export const parseSantander = (text) => {
         }
         continue;
     }
+
+    // Ignorar linhas de rodapé ou metadados
+    if (upperLine.includes('PAGINA:') || upperLine.includes('PÁGINA:')) continue;
 
     const dateMatch = line.match(dateRegex);
     let currentLineDate = null;
@@ -101,15 +113,30 @@ export const parseSantander = (text) => {
       // Descrição é o que sobrou na linha
       let desc = line.substring(0, transactionValueIndex).trim();
       
+      // Se não houver descrição antes do valor, tenta pegar o que vem depois
       if (!desc && transactions.length > 0) {
           desc = line.substring(transactionValueIndex + transactionValueStr.length).trim();
       }
 
       // Limpeza da descrição
       desc = desc.replace(/\s+/g, ' ').trim();
+      
+      // Se a descrição for apenas números ou muito curta, pode ser lixo
+      if (/^[\d.\-/ ]+$/.test(desc) && desc.length > 0) {
+          // Se for só número, tenta pegar a próxima linha como descrição se ela não tiver data/valor
+          if (i + 1 < lines.length) {
+              const nextLine = lines[i+1].trim();
+              if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex)) {
+                  desc = nextLine;
+                  i++;
+              }
+          }
+      }
+
+      // Remover número de documento (6-10 dígitos)
       desc = desc.replace(/\s+\d{6,10}\s*/, ' ').trim();
       
-      if (desc === '-' || !desc) {
+      if (desc === '-' || !desc || desc.length < 2) {
           const textOnly = line.replace(valueRegex, '').replace(/[0-9]/g, '').replace(/[-.,]/g, '').trim();
           desc = textOnly || 'TRANSACAO';
       }
@@ -131,6 +158,9 @@ export const parseSantander = (text) => {
       
       if (!isNaN(num)) {
         if (isNegative) num = -num;
+
+        // Filtro adicional: evitar transações de valor zero (comum em quebras de página)
+        if (num === 0) continue;
 
         if (!dateCounts[currentLineDate]) dateCounts[currentLineDate] = 1;
         const fitid = `${currentLineDate}${String(dateCounts[currentLineDate]++).padStart(4, '0')}`;
