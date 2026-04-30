@@ -58,46 +58,22 @@ export const parseSantander = (text) => {
   const dateRegex = /^(\d{2}\/\d{2})\s+/;
 
   let lastDate = null;
-  let inMovimentacao = false;
-  let sectionCCFound = false;
-  let stopForever = false;
-  let transactionFound = false;
 
   for (let i = 0; i < lines.length; i++) {
-    if (stopForever) break;
-
     let line = lines[i].trim();
     if (!line) continue;
     const upperLine = line.toUpperCase();
 
-    // Ignorar explicitamente tabelas de índices
-    if (upperLine.includes('IBOVESPA') || upperLine.includes('IGPM') || upperLine.includes('INCC') || (upperLine.includes('DOLAR') && !upperLine.includes('COMPRA'))) {
-        continue;
-    }
-
-    // Detectar Seção de Conta Corrente (Ignorar se for apenas parte do resumo)
-    if (upperLine.includes('CONTA CORRENTE') && !upperLine.includes('SALDO DE')) {
-        sectionCCFound = true;
-    }
-
-    // Início da Movimentação
-    if (sectionCCFound && upperLine.includes('MOVIMENTAÇÃO') && !upperLine.includes('MENSAL')) {
-      inMovimentacao = true;
-      continue;
-    }
-    
-    // FIM DEFINITIVO (Somente se já tivermos começado a ler transações reais)
-    // Isso evita que a palavra "Investimentos" no Resumo inicial pare o processo.
-    if (transactionFound && (upperLine.includes('SALDOS POR PERÍODO') || upperLine.includes('INVESTIMENTOS') || upperLine.includes('ÍNDICES ECONÔMICOS'))) {
-      inMovimentacao = false;
-      stopForever = true;
-      continue;
-    }
-
-    if (!inMovimentacao) continue;
-
-    // Ignorar linhas de saldo e metadados
-    if (upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('PAGINA:') || upperLine.includes('PÁGINA:')) {
+    // --- FILTROS DE EXCLUSÃO (LISTA NEGRA) ---
+    // Ignorar cabeçalhos, resumos, índices e saldos
+    if (upperLine.includes('IBOVESPA') || upperLine.includes('IGPM') || upperLine.includes('INCC') || 
+        upperLine.includes('DOLAR') || upperLine.includes('EURO') || upperLine.includes('ÍNDICES') ||
+        upperLine.includes('SALDO EM') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO ATUAL') ||
+        upperLine.includes('RESUMO -') || upperLine.includes('INVESTIMENTOS') || upperLine.includes('TOTAL DE') ||
+        upperLine.includes('PAGINA:') || upperLine.includes('PÁGINA:') || upperLine.includes('LIMITE') ||
+        upperLine.includes('CONTA CORRENTE') || upperLine.includes('MOVIMENTAÇÃO') || upperLine.includes('EXTRATO')) {
+        
+        // Tenta capturar a data para manter o contexto do ano/mês, mas pula a linha como transação
         const dateSearch = line.match(/(\d{2}\/\d{2})/);
         if (dateSearch) {
             const parts = (dateSearch[1] + '/' + currentYear).split('/');
@@ -124,10 +100,11 @@ export const parseSantander = (text) => {
     // Capturar valores
     const values = [...line.matchAll(valueRegex)];
     if (values.length > 0) {
+      // Primeiro valor é a transação
       let transactionValueStr = values[0][0];
       let transactionValueIndex = values[0].index;
 
-      // Descrição principal
+      // Descrição
       let desc = line.substring(0, transactionValueIndex).trim();
       
       // Capturar Doc
@@ -135,8 +112,8 @@ export const parseSantander = (text) => {
       const docMatch = line.match(/\b(\d{6})\b/);
       if (docMatch) docNumber = docMatch[1];
 
-      // Se a descrição for curta ou numérica, busca a próxima linha
-      if (/^[\d.\-/ ]+$/.test(desc) || desc.length < 3) {
+      // Se a descrição for curta, pega a próxima linha
+      if (desc.length < 3 || /^[\d.\-/ ]+$/.test(desc)) {
           if (i + 1 < lines.length) {
               const nextLine = lines[i+1].trim();
               if (nextLine && !nextLine.match(dateRegex) && !nextLine.match(valueRegex)) {
@@ -147,7 +124,7 @@ export const parseSantander = (text) => {
       }
 
       desc = desc.replace(/\s+/g, ' ').trim();
-      if (desc === '-' || !desc || desc.length < 2 || desc.toUpperCase().includes('SALDO EM')) continue;
+      if (!desc || desc.length < 2 || desc.toUpperCase().includes('SALDO EM')) continue;
 
       // Tratamento de Valor
       let cleanValue = transactionValueStr;
@@ -160,8 +137,6 @@ export const parseSantander = (text) => {
       
       if (!isNaN(num) && num !== 0) {
         if (isNegative) num = -num;
-
-        transactionFound = true; // MARCA QUE ACHAMOS UMA TRANSAÇÃO REAL
 
         if (!dateCounts[currentLineDate]) dateCounts[currentLineDate] = 1;
         const fitid = `${currentLineDate}${String(dateCounts[currentLineDate]++).padStart(4, '0')}`;
