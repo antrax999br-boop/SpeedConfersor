@@ -68,7 +68,7 @@ export const parseBradesco = (text) => {
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
   
   let currentTrn = null;
-  let expectedTxCount = 0;
+  let rawValueCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -76,6 +76,7 @@ export const parseBradesco = (text) => {
 
     const upperLine = line.toUpperCase();
     
+    // Ignora cabeçalhos, rodapés e saldos para a contagem de transações
     if (upperLine.includes('SALDO ANTERIOR') || 
         upperLine.includes('SALDO DO DIA') || 
         upperLine.includes('SALDO FINAL') ||
@@ -89,26 +90,43 @@ export const parseBradesco = (text) => {
     const dateMatch = line.match(dateRegex);
     const hasValue = line.match(valueRegex);
 
-    if (dateMatch && hasValue) {
-      expectedTxCount++;
-      if (currentTrn) transactions.push(currentTrn);
+    if (hasValue) rawValueCount++; // Conta quantas linhas têm valores válidos de transação
 
+    if (dateMatch) {
+      // Inicia um novo bloco de transação
       let rawDate = dateMatch[1];
       const dp = rawDate.split('/');
       let year = dp.length === 3 ? dp[2] : currentYear;
       if (year.length === 2) year = '20' + year;
       const formattedDate = `${year}${dp[1]}${dp[0]}`;
 
+      currentTrn = {
+        date: formattedDate,
+        rawDesc: line.replace(dateMatch[0], '').trim(),
+        amount: null,
+        checkNum: '0'
+      };
+    } else if (currentTrn && !currentTrn.amount) {
+      // Acumula multilinhas se a transação ainda não foi fechada com um valor
+      currentTrn.rawDesc += ' ' + line;
+    }
+
+    // Se o bloco está aberto e encontramos um valor (pode estar na mesma linha da data ou em linhas abaixo)
+    if (currentTrn && !currentTrn.amount && hasValue) {
       const vals = line.match(valueRegex);
-      let rawVal = vals[0]; // Usando o primeiro valor da linha (Bradesco costuma ter valor e as vezes saldo no final da linha)
+      let rawVal = vals[0]; // Pega o valor da transação (ignora o saldo progressivo se houver)
       
       let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
       
-      // Remove data e valor da linha para pegar a descrição e o documento (checknum)
-      let desc = line.replace(dateMatch[0], '').replace(rawVal, '').trim();
+      // Limpa o valor do memo
+      currentTrn.rawDesc = currentTrn.rawDesc.replace(rawVal, '').trim();
+      // Remove saldos progressivos que possam ter grudado no memo
+      if (vals.length > 1) {
+          currentTrn.rawDesc = currentTrn.rawDesc.replace(vals[1], '').trim();
+      }
 
-      // Heurística de DÉBITO baseada no texto (caso o PDF não tenha sinal de negativo claro)
-      const upperDescForNeg = desc.toUpperCase();
+      // Heurística de DÉBITO
+      const upperDescForNeg = currentTrn.rawDesc.toUpperCase();
       if (!isNeg) {
         if (upperDescForNeg.includes('PIX DES:') || 
             upperDescForNeg.includes('PAGTO') || 
@@ -123,34 +141,27 @@ export const parseBradesco = (text) => {
       }
 
       let valNumStr = rawVal.replace(/[^\d,]/g, '');
-      let finalValStr = (isNeg ? '-' : '') + valNumStr;
+      currentTrn.amount = (isNeg ? '-' : '') + valNumStr;
 
-      // Extrair Dcto (documento) - costuma ser números soltos no final da descrição antes do valor
-      let checkNum = '0';
-      const descParts = desc.split(/\s+/);
+      // Extrai Dcto (documento) do final da descrição acumulada
+      const descParts = currentTrn.rawDesc.split(/\s+/);
       if (descParts.length > 1) {
         const lastPart = descParts[descParts.length - 1];
         if (/^\d+$/.test(lastPart) && lastPart.length >= 1) {
-          checkNum = lastPart;
-          desc = descParts.slice(0, -1).join(' '); // Remove o documento da descrição
+          currentTrn.checkNum = lastPart;
+          descParts.pop(); // remove o doc
+          currentTrn.rawDesc = descParts.join(' ');
         }
       }
 
-      currentTrn = {
-        date: formattedDate,
-        amount: finalValStr, // String com VÍRGULA
-        rawDesc: desc,
-        checkNum: checkNum
-      };
-    } else if (currentTrn) {
-      currentTrn.rawDesc += ' ' + line;
+      transactions.push(currentTrn);
+      currentTrn = null; // Reseta para o próximo bloco
     }
   }
-  
-  if (currentTrn) transactions.push(currentTrn);
 
-  if (transactions.length !== expectedTxCount) {
-    throw new Error(`Falha de validação: transações incompletas. Esperado: ${expectedTxCount}, Gerado: ${transactions.length}`);
+  // FASE 4 - VALIDAÇÃO OBRIGATÓRIA (CRÍTICA)
+  if (transactions.length !== rawValueCount) {
+    throw new Error(`FALHA DE VALIDAÇÃO: Quantidade de valores no PDF (${rawValueCount}) difere do número de transações geradas (${transactions.length}). Cancelando geração por segurança.`);
   }
 
   const processedTransactions = transactions.map((t, idx) => {
