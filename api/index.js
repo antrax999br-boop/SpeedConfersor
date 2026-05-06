@@ -11,6 +11,7 @@ import * as itau from './parsers/itau.js';
 import * as bradesco from './parsers/bradesco.js';
 import * as nubank from './parsers/nubank.js';
 import * as santander from './parsers/santander.js';
+import * as inter from './parsers/inter.js';
 
 const app = express();
 app.use(cors());
@@ -60,7 +61,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       if (upperText.includes('SANTANDER') || upperText.includes('033-7')) {
         bankModule = santander;
       } else if (upperText.includes('BANCO INTER') || upperText.includes('INTERMEDIUM') || (upperText.includes('INTER') && !upperText.includes('INTERNET'))) {
-        bankModule = universal; // Inter uses universal for now
+        bankModule = inter;
       } else if (upperText.includes('ITAÚ') || upperText.includes('ITAU')) {
         bankModule = itau;
       } else {
