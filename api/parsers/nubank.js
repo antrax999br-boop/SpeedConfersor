@@ -9,10 +9,19 @@ export const parseNubank = (text) => {
   let dtStart = '';
   let dtEnd = '';
   
-  const metaMatch = text.match(/Agência\s*(\d+)\s*Conta\s*([\d-]+)/i);
-  if (metaMatch) {
-    branchId = metaMatch[1].padStart(4, '0');
-    acctId = metaMatch[2].replace(/\D/g, '');
+  // Limpeza de quebras de linha para garantir que Agência e Conta sejam lidas mesmo se o PDF quebrar a linha
+  const cleanMetaText = text.replace(/[\r\n]+/g, ' ');
+  
+  const branchMatch = cleanMetaText.match(/(?:Agência|Agencia|Ag\.|Ag):?\s*(\d+)/i);
+  if (branchMatch) {
+    branchId = branchMatch[1].padStart(4, '0');
+  }
+
+  const acctMatch = cleanMetaText.match(/(?:Conta|Cta|C\/C):?\s*([\d-]+)/i);
+  if (acctMatch) {
+    const rawAcct = acctMatch[1].replace(/\D/g, '');
+    // Contmatic muitas vezes espera a junção de Agência + Conta
+    acctId = branchId + rawAcct;
   }
 
   let finalBalance = '0.00';
