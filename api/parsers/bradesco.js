@@ -184,12 +184,15 @@ export const parseBradesco = (text) => {
     throw new Error(`FALHA DE VALIDAÇÃO: Nenhuma transação foi encontrada no extrato do Bradesco. Verifique o formato do PDF.`);
   }
 
-  const invalidTx = transactions.find(t => !t.amount || t.amount === '0,00' || t.amount === '-0,00');
+  const invalidTx = transactions.find(t => !t.amount);
   if (invalidTx) {
     throw new Error(`FALHA DE VALIDAÇÃO: Uma transação na data ${invalidTx.date} foi capturada sem valor ou corrompida. Cancelando geração.`);
   }
 
-  const processedTransactions = transactions.map((t, idx) => {
+  // Ignorar transações zeradas (ex: invest facil zerado no arquivo) para não atrapalhar o OFX
+  const validTransactions = transactions.filter(t => t.amount !== '0,00' && t.amount !== '-0,00');
+
+  const processedTransactions = validTransactions.map((t, idx) => {
     // Manter MEMO completo em uma linha só
     const fullDesc = t.rawDesc.replace(/\s+/g, ' ').trim();
     const type = t.amount.startsWith('-') ? 'DEBIT' : 'CREDIT';
