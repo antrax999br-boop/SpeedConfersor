@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { generateOFX } from '../utils/ofx-generator.js';
 
 const fixEncoding = (text) => {
   if (!text) return text;
@@ -15,149 +14,262 @@ const fixEncoding = (text) => {
     .replace(/Ã£/g, 'ã')
     .replace(/Ãµ/g, 'õ')
     .replace(/Ã§/g, 'ç')
+    .replace(/Ã€/g, 'À')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ã /g, 'à')
     .replace(/Â/g, '');
 };
 
 export const parseBradesco = (text) => {
   text = fixEncoding(text);
-  const transactions = [];
   const lines = text.split('\n');
   
-  const dateRegex = /(\d{2}\/\d{2}\/(?:\d{4}|\d{2}))/;
-  const valueRegex = /(-?\d+(?:\.\d{3})*,\d{2}-?)/g;
+  let acctId = '';
+  let finalBalance = '0,00';
+  let balanceDate = '00000000';
+
+  const metaText = text.replace(/\r/g, '');
   
-  let branchId = '0001';
-  let acctId = '99999999';
+  // Extração de conta do Bradesco
+  const acctMatch = metaText.match(/(?:Conta|Cta|C\/C|CC:?)\s*([\d-]+)/i);
+  if (acctMatch) {
+    acctId = acctMatch[1].replace(/\D/g, '').replace(/^0+/, '');
+  }
 
-  // Extração de agência e conta (Bradesco format)
-  // Ex: 02003 | 0568985-6 or Ag: 2003 | CC: 0568985-6
-  const branchMatch = text.match(/(?:Agência|Ag:?)\s*(\d+)/i);
-  if (branchMatch) branchId = branchMatch[1].padStart(4, '0');
+  const valueRegex = /[-]?\d{1,3}(?:\.\d{3})*,\d{2}-?/g;
+  
+  // Saldo Final
+  const balanceLines = lines.filter(l => l.toUpperCase().includes('SALDO') && l.match(valueRegex));
+  if (balanceLines.length > 0) {
+    const lastBalanceLine = balanceLines[balanceLines.length - 1];
+    const vals = lastBalanceLine.match(valueRegex);
+    if (vals) {
+      let val = vals[vals.length - 1];
+      let isNeg = val.includes('-') || val.startsWith('-');
+      val = val.replace(/[^\d,]/g, ''); 
+      finalBalance = (isNeg ? '-' : '') + val;
+      
+      const dMatch = lastBalanceLine.match(/(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/);
+      if (dMatch) {
+        let rawDate = dMatch[1];
+        const parts = rawDate.split('/');
+        let year = parts.length === 3 ? parts[2] : new Date().getFullYear().toString();
+        if (year.length === 2) year = '20' + year;
+        balanceDate = `${year}${parts[1]}${parts[0]}`;
+      }
+    }
+  }
 
-  const acctMatch = text.match(/(?:Conta|Cta|C\/C|CC:?)\s*(\d+)(?:-\d)?/i);
-  if (acctMatch) acctId = acctMatch[1];
+  const transactions = [];
+  let currentYear = new Date().getFullYear().toString();
+  const yearMatch = text.match(/\d{2}\/\d{2}\/(20\d{2})/);
+  if (yearMatch) currentYear = yearMatch[1];
 
-  let currentTransaction = null;
-  let dateCounts = {};
+  const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
+  
+  let currentTrn = null;
+  let expectedTxCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
-    const dateMatch = line.match(dateRegex);
+    const upperLine = line.toUpperCase();
     
-    if (dateMatch) {
-      if (currentTransaction) {
-        transactions.push(currentTransaction);
-        currentTransaction = null;
-      }
+    if (upperLine.includes('SALDO ANTERIOR') || 
+        upperLine.includes('SALDO DO DIA') || 
+        upperLine.includes('SALDO FINAL') ||
+        upperLine.includes('SALDOS POR') ||
+        (upperLine.includes('EXTRATO') && !line.match(valueRegex)) ||
+        upperLine.includes('TOTAL') ||
+        upperLine.includes('PÁGINA')) {
+      continue;
+    }
+
+    const dateMatch = line.match(dateRegex);
+    const hasValue = line.match(valueRegex);
+
+    if (dateMatch && hasValue) {
+      expectedTxCount++;
+      if (currentTrn) transactions.push(currentTrn);
 
       let rawDate = dateMatch[1];
-      const parts = rawDate.split('/');
-      let year = parts[2];
+      const dp = rawDate.split('/');
+      let year = dp.length === 3 ? dp[2] : currentYear;
       if (year.length === 2) year = '20' + year;
-      const formattedDate = `${year}${parts[1]}${parts[0]}`;
+      const formattedDate = `${year}${dp[1]}${dp[0]}`;
 
-      // Ignorar linhas de saldo
-      const upperLine = line.toUpperCase();
-      if (upperLine.includes('SALDO ANTERIOR') || upperLine.includes('SALDO DO DIA') || upperLine.includes('SALDO FINAL')) {
-        continue;
-      }
+      const vals = line.match(valueRegex);
+      let rawVal = vals[0]; // Usando o primeiro valor da linha (Bradesco costuma ter valor e as vezes saldo no final da linha)
+      
+      let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
+      
+      // Remove data e valor da linha para pegar a descrição e o documento (checknum)
+      let desc = line.replace(dateMatch[0], '').replace(rawVal, '').trim();
 
-      // Encontrar valores (Bradesco Net Empresa costuma ter Valor e depois Saldo na mesma linha)
-      let values = [];
-      let vMatch;
-      valueRegex.lastIndex = 0;
-      while ((vMatch = valueRegex.exec(line)) !== null) {
-        values.push({
-          valueStr: vMatch[0],
-          index: vMatch.index
-        });
-      }
-
-      if (values.length > 0) {
-        // O primeiro valor é a transação, o segundo é o saldo progressivo
-        const valueObj = values[0];
-        let rawValue = valueObj.valueStr;
-        let isNegative = false;
-        
-        if (rawValue.endsWith('-')) {
-          isNegative = true;
-          rawValue = rawValue.slice(0, -1);
-        } else if (rawValue.startsWith('-')) {
-          isNegative = true;
-          rawValue = rawValue.substring(1);
+      // Heurística de DÉBITO baseada no texto (caso o PDF não tenha sinal de negativo claro)
+      const upperDescForNeg = desc.toUpperCase();
+      if (!isNeg) {
+        if (upperDescForNeg.includes('PIX DES:') || 
+            upperDescForNeg.includes('PAGTO') || 
+            upperDescForNeg.includes('PAGAMENTO') || 
+            upperDescForNeg.includes('TARIFA') || 
+            upperDescForNeg.includes('MENSALIDADE') || 
+            upperDescForNeg.includes('ANUIDADE') || 
+            upperDescForNeg.includes('DEB AUTOMATICO') ||
+            (upperDescForNeg.includes('CARTAO CREDITO') && !upperDescForNeg.includes('CREDITO/DEBITO')) ) {
+          isNeg = true;
         }
+      }
 
-        let cleanValue = rawValue.replace(/\./g, '').replace(',', '.');
-        let numValue = parseFloat(cleanValue);
-        
-        // No Bradesco Net Empresa, débitos às vezes não têm sinal se estão na coluna de Débito,
-        // mas na extração de texto eles costumam vir com sinal ou em posições específicas.
-        // Se houver sinal, respeitamos. Se não, tentamos inferir pela descrição (heurística simples).
-        if (isNegative) numValue = -numValue;
+      let valNumStr = rawVal.replace(/[^\d,]/g, '');
+      let finalValStr = (isNeg ? '-' : '') + valNumStr;
 
-        // Descrição entre a data e o valor
-        let description = line.substring(dateMatch[0].length, valueObj.index).trim();
-        
-        // Remover número de documento (Dcto) que costuma ser o último conjunto de dígitos antes do valor
-        const descParts = description.split(/\s+/);
-        if (descParts.length > 1) {
-          const lastPart = descParts[descParts.length - 1];
-          if (/^\d+$/.test(lastPart) && lastPart.length > 3) {
-            description = descParts.slice(0, -1).join(' ');
-          }
+      // Extrair Dcto (documento) - costuma ser números soltos no final da descrição antes do valor
+      let checkNum = '0';
+      const descParts = desc.split(/\s+/);
+      if (descParts.length > 1) {
+        const lastPart = descParts[descParts.length - 1];
+        if (/^\d+$/.test(lastPart) && lastPart.length >= 1) {
+          checkNum = lastPart;
+          desc = descParts.slice(0, -1).join(' '); // Remove o documento da descrição
         }
-
-        if (!dateCounts[formattedDate]) dateCounts[formattedDate] = 1;
-        const fitid = `${formattedDate}${String(dateCounts[formattedDate]++).padStart(4, '0')}`;
-
-        currentTransaction = {
-          date: formattedDate,
-          type: numValue < 0 ? 'DEBIT' : 'CREDIT',
-          amount: numValue.toFixed(2),
-          name: description.substring(0, 32).toUpperCase().trim(),
-          memo: description.toUpperCase().trim(),
-          id: fitid
-        };
       }
-    } else if (currentTransaction) {
-      // Linhas de continuação (descrição multiline)
-      const upperLine = line.toUpperCase();
-      if (!upperLine.includes('TOTAL') && !upperLine.includes('INVESTIMENTO') && !upperLine.includes('EXTRATO') && line.length > 3) {
-          const lineValues = line.match(valueRegex);
-          if (!lineValues) {
-              currentTransaction.memo += ' ' + line.toUpperCase();
-              currentTransaction.name = currentTransaction.memo.substring(0, 32).trim();
-          } else {
-              // Se achou um valor sem data, pode ser outra transação ou lixo
-              transactions.push(currentTransaction);
-              currentTransaction = null;
-          }
-      }
+
+      currentTrn = {
+        date: formattedDate,
+        amount: finalValStr, // String com VÍRGULA
+        rawDesc: desc,
+        checkNum: checkNum
+      };
+    } else if (currentTrn) {
+      currentTrn.rawDesc += ' ' + line;
     }
   }
+  
+  if (currentTrn) transactions.push(currentTrn);
 
-  if (currentTransaction) {
-    transactions.push(currentTransaction);
+  if (transactions.length !== expectedTxCount) {
+    throw new Error(`Falha de validação: transações incompletas. Esperado: ${expectedTxCount}, Gerado: ${transactions.length}`);
+  }
+
+  const processedTransactions = transactions.map((t, idx) => {
+    // Manter MEMO completo em uma linha só
+    const fullDesc = t.rawDesc.replace(/\s+/g, ' ').trim();
+    const type = t.amount.startsWith('-') ? 'DEBIT' : 'CREDIT';
+    
+    // FITID no padrão Bradesco (N + sequência única hexadecimal)
+    const baseHex = 65800; 
+    const fitid = 'N' + (baseHex + idx).toString(16).toUpperCase();
+
+    return {
+      date: t.date + '120000',
+      amount: t.amount,
+      type: type,
+      memo: fullDesc.toUpperCase(),
+      id: fitid,
+      checkNum: t.checkNum
+    };
+  });
+
+  let dtStart = '';
+  let dtEnd = '';
+  if (processedTransactions.length > 0) {
+    const dates = processedTransactions.map(t => t.date.substring(0, 8)).sort();
+    dtStart = dates[0] + '120000';
+    dtEnd = dates[dates.length - 1] + '120000';
   }
 
   return {
-    transactions,
+    transactions: processedTransactions,
     bankInfo: {
-      branchId,
-      acctId
+      acctId: acctId || '000000',
+      dtStart,
+      dtEnd,
+      finalBalance,
+      balanceDate: '00000000'
     }
   };
 };
 
 export const bankConfig = {
-  bankId: '237',
+  bankId: '0237',
   bankName: 'Banco Bradesco S.A.'
 };
 
 export const convertToOFX = (text) => {
   const { transactions, bankInfo } = parseBradesco(text);
-  return generateOFX(transactions, { ...bankConfig, ...bankInfo });
-};
+  
+  let ofx = `OFXHEADER:100\r\n`;
+  ofx += `DATA:OFXSGML\r\n`;
+  ofx += `VERSION:102\r\n`;
+  ofx += `SECURITY:NONE\r\n`;
+  ofx += `ENCODING:USASCII\r\n`;
+  ofx += `CHARSET:1252\r\n`;
+  ofx += `COMPRESSION:NONE\r\n`;
+  ofx += `OLDFILEUID:NONE\r\n`;
+  ofx += `NEWFILEUID:NONE\r\n\r\n`;
 
+  ofx += `<OFX>\r\n`;
+  ofx += `<SIGNONMSGSRSV1>\r\n`;
+  ofx += `<SONRS>\r\n`;
+  ofx += `<STATUS>\r\n`;
+  ofx += `<CODE>0\r\n`;
+  ofx += `<SEVERITY>INFO\r\n`;
+  ofx += `</STATUS>\r\n`;
+  ofx += `<DTSERVER>00000000000000\r\n`;
+  ofx += `<LANGUAGE>POR\r\n`;
+  ofx += `</SONRS>\r\n`;
+  ofx += `</SIGNONMSGSRSV1>\r\n`;
+
+  ofx += `<BANKMSGSRSV1>\r\n`;
+  ofx += `<STMTTRNRS>\r\n`;
+  ofx += `<TRNUID>1001\r\n`;
+  ofx += `<STATUS>\r\n`;
+  ofx += `<CODE>0\r\n`;
+  ofx += `<SEVERITY>INFO\r\n`;
+  ofx += `</STATUS>\r\n`;
+  
+  ofx += `<STMTRS>\r\n`;
+  ofx += `<CURDEF>BRL\r\n`;
+  
+  ofx += `<BANKACCTFROM>\r\n`;
+  ofx += `<BANKID>0237\r\n`;
+  ofx += `<ACCTID>${bankInfo.acctId}\r\n`;
+  ofx += `<ACCTTYPE>CHECKING\r\n`;
+  ofx += `</BANKACCTFROM>\r\n`;
+  
+  ofx += `<BANKTRANLIST>\r\n`;
+  ofx += `<DTSTART>${bankInfo.dtStart}\r\n`;
+  ofx += `<DTEND>${bankInfo.dtEnd}\r\n`;
+
+  for (const t of transactions) {
+    ofx += `<STMTTRN>\r\n`;
+    ofx += `<TRNTYPE>${t.type}\r\n`;
+    ofx += `<DTPOSTED>${t.date}\r\n`;
+    ofx += `<TRNAMT>${t.amount}\r\n`; // VALOR COM VÍRGULA
+    ofx += `<FITID>${t.id}\r\n`;
+    ofx += `<CHECKNUM>${t.checkNum}\r\n`;
+    ofx += `<MEMO>${t.memo}\r\n`;
+    ofx += `</STMTTRN>\r\n`;
+  }
+
+  ofx += `</BANKTRANLIST>\r\n`;
+  
+  ofx += `<LEDGERBAL>\r\n`;
+  ofx += `<BALAMT>${bankInfo.finalBalance}\r\n`; // VALOR COM VÍRGULA
+  ofx += `<DTASOF>${bankInfo.balanceDate}\r\n`;
+  ofx += `</LEDGERBAL>\r\n`;
+  
+  ofx += `<AVAILBAL>\r\n`;
+  ofx += `<BALAMT>${bankInfo.finalBalance}\r\n`; // VALOR COM VÍRGULA
+  ofx += `<DTASOF>${bankInfo.balanceDate}\r\n`;
+  ofx += `</AVAILBAL>\r\n`;
+  
+  ofx += `</STMTRS>\r\n`;
+  ofx += `</STMTTRNRS>\r\n`;
+  ofx += `</BANKMSGSRSV1>\r\n`;
+  ofx += `</OFX>\r\n`;
+
+  return ofx;
+};
