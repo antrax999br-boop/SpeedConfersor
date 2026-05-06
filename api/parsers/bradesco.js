@@ -293,6 +293,7 @@ export const convertToOFX = (text) => {
     ofx += ` <FITID>${t.id}\r\n`;
     if (t.checkNum) {
       ofx += ` <CHECKNUM>${t.checkNum}\r\n`;
+      ofx += ` <REFNUM>${t.checkNum}\r\n`;
     }
     ofx += ` <MEMO>${t.memo}\r\n`;
     ofx += `</STMTTRN>\r\n\r\n`;
