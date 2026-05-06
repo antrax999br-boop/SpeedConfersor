@@ -142,12 +142,11 @@ export const parseBradesco = (text) => {
          year = currentYear;
       }
       
-      // Se voltamos de Janeiro para Dezembro, é porque o ano mais frequente era do ano seguinte,
-      // e estamos no começo do extrato (ex: 15/12 a 15/01, e 2026 foi mais frequente).
-      if (lastMonth === -1 && txMonth === 12 && currentYear === new Date().getFullYear().toString() && new Date().getMonth() <= 2) {
-         let expectedCurrent = new Date().getFullYear();
-         if (parseInt(currentYear, 10) === expectedCurrent) {
-            currentYear = (expectedCurrent - 1).toString();
+      // Se a primeira transação é em Dezembro, e o ano base eleito é o ano atual (ex: 2026 devido à data de impressão),
+      // verificamos se existe "12/2026" no extrato. Se não existir, é 100% de certeza que o mês 12 pertence ao ano anterior.
+      if (lastMonth === -1 && txMonth === 12 && parseInt(currentYear, 10) >= new Date().getFullYear()) {
+         if (!text.includes('12/' + currentYear) && !text.includes('12/20' + currentYear.slice(-2))) {
+            currentYear = (parseInt(currentYear, 10) - 1).toString();
             year = currentYear;
          }
       }
