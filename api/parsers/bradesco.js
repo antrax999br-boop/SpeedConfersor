@@ -90,6 +90,8 @@ export const parseBradesco = (text) => {
     }
   }
 
+  const baseYear = currentYear; // Guarda o ano mais frequente (ano base do extrato)
+
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
   
   let currentTrn = null;
@@ -107,6 +109,7 @@ export const parseBradesco = (text) => {
         upperLine.includes('SALDO DO DIA') || 
         upperLine.includes('SALDO FINAL') ||
         upperLine.includes('SALDOS POR') ||
+        upperLine.includes('SALDO INVEST') ||
         (upperLine.includes('EXTRATO') && !line.match(valueRegex)) ||
         upperLine.includes('TOTAL') ||
         upperLine.includes('PÁGINA')) {
@@ -215,8 +218,12 @@ export const parseBradesco = (text) => {
     throw new Error(`FALHA DE VALIDAÇÃO: Uma transação na data ${invalidTx.date} foi capturada sem valor ou corrompida. Cancelando geração.`);
   }
 
-  // Ignorar transações zeradas
-  const validTransactions = transactions.filter(t => t.amount !== '0.00' && t.amount !== '-0.00');
+  // Ignorar transações zeradas e transações que fujam do ano base (como investimentos futuros projetados para o próximo ano)
+  const validTransactions = transactions.filter(t => 
+      t.amount !== '0.00' && 
+      t.amount !== '-0.00' &&
+      t.date.substring(0, 4) === baseYear
+  );
 
   const dailyCounters = {};
   const processedTransactions = validTransactions.map((t) => {
