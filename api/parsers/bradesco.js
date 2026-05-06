@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { generateOFX } from '../utils/ofx-generator.js';
 
 const fixEncoding = (text) => {
   if (!text) return text;
@@ -148,5 +149,15 @@ export const parseBradesco = (text) => {
       acctId
     }
   };
+};
+
+export const bankConfig = {
+  bankId: '237',
+  bankName: 'Banco Bradesco S.A.'
+};
+
+export const convertToOFX = (text) => {
+  const { transactions, bankInfo } = parseBradesco(text);
+  return generateOFX(transactions, { ...bankConfig, ...bankInfo });
 };
 

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { generateOFX } from '../utils/ofx-generator.js';
 
 export const parseNubank = (text) => {
   const transactions = [];
@@ -58,4 +59,14 @@ export const parseNubank = (text) => {
       acctId: '99999999'
     }
   };
+};
+
+export const bankConfig = {
+  bankId: '260',
+  bankName: 'Nu Pagamentos S.A.'
+};
+
+export const convertToOFX = (text) => {
+  const { transactions, bankInfo } = parseNubank(text);
+  return generateOFX(transactions, { ...bankConfig, ...bankInfo });
 };

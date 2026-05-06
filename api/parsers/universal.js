@@ -1,3 +1,4 @@
+import { generateOFX } from '../utils/ofx-generator.js';
 
 const monthsMap = {
   'janeiro': '01', 'fevereiro': '02', 'março': '03', 'marco': '03',
@@ -171,4 +172,14 @@ export const parseUniversal = (text) => {
       acctId
     }
   };
+};
+
+export const bankConfig = {
+  bankId: '999',
+  bankName: 'Banco'
+};
+
+export const convertToOFX = (text) => {
+  const { transactions, bankInfo } = parseUniversal(text);
+  return generateOFX(transactions, { ...bankConfig, ...bankInfo });
 };

@@ -1,3 +1,4 @@
+import { generateOFX } from '../utils/ofx-generator.js';
 
 const fixEncoding = (text) => {
   if (!text) return text;
@@ -149,4 +150,18 @@ export const parseSantander = (text) => {
       orgName
     }
   };
+};
+
+export const bankConfig = {
+  bankId: '033',
+  bankName: 'Banco Santander (Brasil) S.A.'
+};
+
+export const convertToOFX = (text) => {
+  const { transactions, bankInfo } = parseSantander(text);
+  return generateOFX(transactions, { 
+    ...bankConfig, 
+    ...bankInfo, 
+    bankName: bankInfo.orgName || bankConfig.bankName 
+  });
 };
