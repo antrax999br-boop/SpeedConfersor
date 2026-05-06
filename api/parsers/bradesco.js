@@ -228,7 +228,6 @@ export const parseBradesco = (text) => {
         }
       }
 
-      let valNumStr = rawVal.replace(/[^\d,]/g, '').replace(',', '.');
       currentTrn.amount = (isNeg ? '-' : '') + valNumStr;
 
       // Extrai Dcto (documento) do final da descrição acumulada
