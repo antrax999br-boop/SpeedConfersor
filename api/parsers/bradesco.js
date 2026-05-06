@@ -82,13 +82,28 @@ export const parseBradesco = (text) => {
 
   const transactions = [];
   let currentYear = new Date().getFullYear().toString();
-  const yearMatch = text.match(/\d{2}\/\d{2}\/(20\d{2})/);
-  if (yearMatch) currentYear = yearMatch[1];
+  // Encontra o ano mais frequente no documento (para evitar pegar o ano de emissão do PDF)
+  const yearMatches = [...text.matchAll(/\b\d{2}\/\d{2}\/(20\d{2}|\d{2})\b/g)].map(m => {
+      let y = m[1];
+      return y.length === 2 ? '20' + y : y;
+  });
+  if (yearMatches.length > 0) {
+    const counts = {};
+    let maxCount = 0;
+    for (const y of yearMatches) {
+      counts[y] = (counts[y] || 0) + 1;
+      if (counts[y] > maxCount) {
+        maxCount = counts[y];
+        currentYear = y;
+      }
+    }
+  }
 
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
   
   let currentTrn = null;
   let rawValueCount = 0;
+  let lastMonth = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -116,8 +131,29 @@ export const parseBradesco = (text) => {
       // Inicia um novo bloco de transação
       let rawDate = dateMatch[1];
       const dp = rawDate.split('/');
+      
+      let txMonth = parseInt(dp[1], 10);
       let year = dp.length === 3 ? dp[2] : currentYear;
       if (year.length === 2) year = '20' + year;
+
+      // Se passou de Dezembro para Janeiro cronologicamente, avança o ano
+      if (lastMonth === 12 && txMonth === 1 && dp.length < 3) {
+         currentYear = (parseInt(currentYear, 10) + 1).toString();
+         year = currentYear;
+      }
+      
+      // Se voltamos de Janeiro para Dezembro, é porque o ano mais frequente era do ano seguinte,
+      // e estamos no começo do extrato (ex: 15/12 a 15/01, e 2026 foi mais frequente).
+      if (lastMonth === -1 && txMonth === 12 && currentYear === new Date().getFullYear().toString() && new Date().getMonth() <= 2) {
+         let expectedCurrent = new Date().getFullYear();
+         if (parseInt(currentYear, 10) === expectedCurrent) {
+            currentYear = (expectedCurrent - 1).toString();
+            year = currentYear;
+         }
+      }
+      
+      lastMonth = txMonth;
+
       const formattedDate = `${year}${dp[1]}${dp[0]}`;
 
       currentTrn = {
