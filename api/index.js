@@ -49,24 +49,28 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 
     // Heurística de identificação do banco
-    let bankModule = itau; // Default
+    let bankModule = universal; // Default
     const lowerText = text.toLowerCase();
     
-    if (lowerText.includes('bradesco')) {
-      bankModule = bradesco;
-    } else if (lowerText.includes('nubank')) {
+    // Usar identificadores mais robustos (frases específicas do extrato) para evitar
+    // falsos positivos causados por nomes de bancos nas descrições de transferências (PIX).
+    if (lowerText.includes('nubank.com.br') || lowerText.includes('nu pagamentos')) {
       bankModule = nubank;
+    } else if (lowerText.includes('bradesco net empresa') || lowerText.includes('fone fácil bradesco') || lowerText.includes('banco bradesco s.a.') && !lowerText.includes('nubank.com.br')) {
+      bankModule = bradesco;
+    } else if (lowerText.includes('banco inter') || lowerText.includes('intermedium')) {
+      bankModule = inter;
+    } else if (lowerText.includes('santander') || lowerText.includes('033-7')) {
+      bankModule = santander;
+    } else if (lowerText.includes('itaú unibanco') || lowerText.includes('itau unibanco') || lowerText.includes('extrato itaú') || lowerText.includes('extrato itau')) {
+      bankModule = itau;
     } else {
-      const upperText = text.toUpperCase();
-      if (upperText.includes('SANTANDER') || upperText.includes('033-7')) {
-        bankModule = santander;
-      } else if (upperText.includes('BANCO INTER') || upperText.includes('INTERMEDIUM') || (upperText.includes('INTER') && !upperText.includes('INTERNET'))) {
-        bankModule = inter;
-      } else if (upperText.includes('ITAÚ') || upperText.includes('ITAU')) {
-        bankModule = itau;
-      } else {
-        bankModule = universal;
-      }
+      // Fallback genérico, mantendo a lógica anterior caso não ache as frases exatas
+      if (lowerText.includes('nubank')) bankModule = nubank;
+      else if (lowerText.includes('bradesco')) bankModule = bradesco;
+      else if (lowerText.includes('inter ')) bankModule = inter;
+      else if (lowerText.includes('itau') || lowerText.includes('itaú')) bankModule = itau;
+      else bankModule = itau;
     }
 
     // Conversão delegada ao módulo do banco
