@@ -30,10 +30,30 @@ export const parseBradesco = (text) => {
 
   const metaText = text.replace(/\r/g, '');
   
-  // Extração de conta do Bradesco
-  const acctMatch = metaText.match(/(?:Conta|Cta|C\/C|CC:?)\s*([\d-]+)/i);
-  if (acctMatch) {
-    acctId = acctMatch[1].replace(/\D/g, '').replace(/^0+/, '');
+  // Extração Dinâmica de Agência e Conta do Bradesco
+  // Pode vir como: "Agência: 02622 Conta: 0254690-6" ou "02622 | 0254690-6" ou "Ag: 02622 CC: 0254690-6"
+  const fullAcctMatch = metaText.match(/(?:Ag[êe]ncia|Ag):?\s*(\d{4,5})\s*(?:\||-)?\s*(?:Conta|Cta|C\/C|CC):?\s*([\d]{5,8}-?\d)/i) ||
+                        metaText.match(/(\d{4,5})\s*\|\s*([\d]{5,8}-?\d)/);
+
+  if (fullAcctMatch) {
+    let branchId = fullAcctMatch[1].replace(/\D/g, '');
+    let conta = fullAcctMatch[2].replace(/\D/g, ''); // remove apenas o hífen e mantém zeros à esquerda
+    acctId = branchId + conta;
+  } else {
+    // Fallback pra buscar solto se não achar na mesma linha, mas garantindo que encontre ambos
+    const bMatch = metaText.match(/(?:Ag[êe]ncia|Ag):?\s*(\d{4,5})/i);
+    const aMatch = metaText.match(/(?:Conta|Cta|C\/C|CC):?\s*([\d]{5,8}-?\d)/i);
+    
+    if (bMatch && aMatch) {
+      let branchId = bMatch[1].replace(/\D/g, '');
+      let conta = aMatch[1].replace(/\D/g, '');
+      acctId = branchId + conta;
+    }
+  }
+
+  // 6. VALIDAÇÃO OBRIGATÓRIA CRÍTICA DA CONTA
+  if (!acctId || acctId.length < 10 || !/^\d+$/.test(acctId)) {
+    throw new Error(`FALHA DE VALIDAÇÃO: Não foi possível extrair a Agência e Conta do Bradesco de forma segura. Valor extraído: "${acctId}". O OFX não será gerado.`);
   }
 
   const valueRegex = /[-]?\d{1,3}(?:\.\d{3})*,\d{2}-?/g;
