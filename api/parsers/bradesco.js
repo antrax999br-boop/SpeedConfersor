@@ -94,9 +94,8 @@ export const parseBradesco = (text) => {
 
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
   
-  let currentTrn = null;
-  let rawValueCount = 0;
-  let lastMonth = -1;
+  let blocks = [];
+  let currentBlock = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -117,27 +116,29 @@ export const parseBradesco = (text) => {
     }
 
     const dateMatch = line.match(dateRegex);
-    const hasValue = line.match(valueRegex);
-
-    if (hasValue) rawValueCount++; // Conta quantas linhas têm valores válidos de transação
-
     if (dateMatch) {
-      // Inicia um novo bloco de transação
-      let rawDate = dateMatch[1];
+       if (currentBlock) blocks.push(currentBlock);
+       currentBlock = { dateRaw: dateMatch[1], lines: [line] };
+    } else if (currentBlock) {
+       currentBlock.lines.push(line);
+    }
+  }
+  if (currentBlock) blocks.push(currentBlock);
+
+  let lastMonth = -1;
+  for (const block of blocks) {
+      let rawDate = block.dateRaw;
       const dp = rawDate.split('/');
       
       let txMonth = parseInt(dp[1], 10);
       let year = dp.length === 3 ? dp[2] : currentYear;
       if (year.length === 2) year = '20' + year;
 
-      // Se passou de Dezembro para Janeiro cronologicamente, avança o ano
       if (lastMonth === 12 && txMonth === 1 && dp.length < 3) {
          currentYear = (parseInt(currentYear, 10) + 1).toString();
          year = currentYear;
       }
       
-      // Se a primeira transação é em Dezembro, e o ano base eleito é o ano atual (ex: 2026 devido à data de impressão),
-      // verificamos se existe "12/2026" no extrato. Se não existir, é 100% de certeza que o mês 12 pertence ao ano anterior.
       if (lastMonth === -1 && txMonth === 12 && parseInt(currentYear, 10) >= new Date().getFullYear()) {
          if (!text.includes('12/' + currentYear) && !text.includes('12/20' + currentYear.slice(-2))) {
             currentYear = (parseInt(currentYear, 10) - 1).toString();
@@ -146,36 +147,34 @@ export const parseBradesco = (text) => {
       }
       
       lastMonth = txMonth;
-
       const formattedDate = `${year}${dp[1]}${dp[0]}`;
 
-      currentTrn = {
-        date: formattedDate,
-        rawDesc: line.replace(dateMatch[0], '').trim(),
-        amount: null,
-        checkNum: '0'
-      };
-    } else if (currentTrn && !currentTrn.amount) {
-      // Acumula multilinhas se a transação ainda não foi fechada com um valor
-      currentTrn.rawDesc += ' ' + line;
-    }
-
-    // Se o bloco está aberto e encontramos um valor (pode estar na mesma linha da data ou em linhas abaixo)
-    if (currentTrn && !currentTrn.amount && hasValue) {
-      const vals = line.match(valueRegex);
-      let rawVal = vals[0]; // Pega o valor da transação (ignora o saldo progressivo se houver)
-      
-      let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
-      
-      // Limpa o valor do memo
-      currentTrn.rawDesc = currentTrn.rawDesc.replace(rawVal, '').trim();
-      // Remove saldos progressivos que possam ter grudado no memo
-      if (vals.length > 1) {
-          currentTrn.rawDesc = currentTrn.rawDesc.replace(vals[1], '').trim();
+      let lastLineWithValue = null;
+      for (let i = block.lines.length - 1; i >= 0; i--) {
+          if (block.lines[i].match(valueRegex)) {
+              lastLineWithValue = block.lines[i];
+              break;
+          }
       }
 
-      // Heurística de DÉBITO
-      const upperDescForNeg = currentTrn.rawDesc.toUpperCase();
+      if (!lastLineWithValue) continue;
+
+      const vals = lastLineWithValue.match(valueRegex);
+      let rawVal = vals[0]; // A regra de ouro: O Valor é SEMPRE o primeiro valor numérico da ÚLTIMA linha do bloco que contém números
+
+      block.lines[0] = block.lines[0].replace(rawDate, '').trim();
+      let fullDesc = block.lines.join(' ');
+      
+      const allValsInBlock = fullDesc.match(valueRegex);
+      if (allValsInBlock) {
+          for (const v of allValsInBlock) {
+             fullDesc = fullDesc.replace(v, '');
+          }
+      }
+      fullDesc = fullDesc.trim();
+
+      let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
+      const upperDescForNeg = fullDesc.toUpperCase();
       if (!isNeg) {
         if (upperDescForNeg.includes('PIX DES:') || 
             upperDescForNeg.includes('PAGTO') || 
@@ -190,22 +189,25 @@ export const parseBradesco = (text) => {
       }
 
       let valNumStr = rawVal.replace(/[^\d,]/g, '').replace(',', '.');
-      currentTrn.amount = (isNeg ? '-' : '') + valNumStr;
+      let finalAmount = (isNeg ? '-' : '') + valNumStr;
 
-      // Extrai Dcto (documento) do final da descrição acumulada
-      const descParts = currentTrn.rawDesc.split(/\s+/);
+      let checkNum = '0';
+      const descParts = fullDesc.split(/\s+/);
       if (descParts.length > 1) {
         const lastPart = descParts[descParts.length - 1];
         if (/^\d+$/.test(lastPart) && lastPart.length >= 1) {
-          currentTrn.checkNum = lastPart;
-          descParts.pop(); // remove o doc
-          currentTrn.rawDesc = descParts.join(' ');
+          checkNum = lastPart;
+          descParts.pop();
+          fullDesc = descParts.join(' ');
         }
       }
 
-      transactions.push(currentTrn);
-      currentTrn = null; // Reseta para o próximo bloco
-    }
+      transactions.push({
+         date: formattedDate,
+         rawDesc: fullDesc,
+         amount: finalAmount,
+         checkNum: checkNum
+      });
   }
 
   // FASE 4 - VALIDAÇÃO OBRIGATÓRIA (CRÍTICA)
