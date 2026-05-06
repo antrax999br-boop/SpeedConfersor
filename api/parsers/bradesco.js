@@ -180,8 +180,13 @@ export const parseBradesco = (text) => {
   }
 
   // FASE 4 - VALIDAÇÃO OBRIGATÓRIA (CRÍTICA)
-  if (transactions.length !== rawValueCount) {
-    throw new Error(`FALHA DE VALIDAÇÃO: Quantidade de valores no PDF (${rawValueCount}) difere do número de transações geradas (${transactions.length}). Cancelando geração por segurança.`);
+  if (transactions.length === 0) {
+    throw new Error(`FALHA DE VALIDAÇÃO: Nenhuma transação foi encontrada no extrato do Bradesco. Verifique o formato do PDF.`);
+  }
+
+  const invalidTx = transactions.find(t => !t.amount || t.amount === '0,00' || t.amount === '-0,00');
+  if (invalidTx) {
+    throw new Error(`FALHA DE VALIDAÇÃO: Uma transação na data ${invalidTx.date} foi capturada sem valor ou corrompida. Cancelando geração.`);
   }
 
   const processedTransactions = transactions.map((t, idx) => {

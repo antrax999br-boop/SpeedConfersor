@@ -80,7 +80,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     res.send(ofxContent);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Erro interno ao processar o arquivo.' });
+    res.status(500).json({ error: error.message || 'Erro interno ao processar o arquivo.' });
   }
 });
 
