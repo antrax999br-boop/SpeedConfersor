@@ -94,6 +94,17 @@ export const parseBradesco = (text) => {
 
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4}|\/\d{2})?)/;
   
+  let runningBalance = null;
+  for (let i = 0; i < lines.length; i++) {
+     if (lines[i].toUpperCase().includes('SALDO ANTERIOR') && lines[i].match(valueRegex)) {
+        const vals = lines[i].match(valueRegex);
+        let sVal = vals[vals.length - 1];
+        let sNeg = sVal.includes('-') || sVal.startsWith('-');
+        runningBalance = parseFloat((sNeg ? '-' : '') + sVal.replace(/[^\d,]/g, '').replace(',', '.'));
+        break;
+     }
+  }
+
   let blocks = [];
   let currentBlock = null;
 
@@ -149,33 +160,56 @@ export const parseBradesco = (text) => {
       lastMonth = txMonth;
       const formattedDate = `${year}${dp[1]}${dp[0]}`;
 
-      let lastLineWithValue = null;
-      for (let i = block.lines.length - 1; i >= 0; i--) {
-          if (block.lines[i].match(valueRegex)) {
-              lastLineWithValue = block.lines[i];
-              break;
-          }
-      }
-
-      if (!lastLineWithValue) continue;
-
-      const vals = lastLineWithValue.match(valueRegex);
-      let rawVal = vals[0]; // A regra de ouro: O Valor é SEMPRE o primeiro valor numérico da ÚLTIMA linha do bloco que contém números
-
       block.lines[0] = block.lines[0].replace(rawDate, '').trim();
       let fullDesc = block.lines.join(' ');
       
       const allValsInBlock = fullDesc.match(valueRegex);
-      if (allValsInBlock) {
-          for (const v of allValsInBlock) {
-             fullDesc = fullDesc.replace(v, '');
+      if (!allValsInBlock) continue;
+
+      let currentSaldoStr = allValsInBlock[allValsInBlock.length - 1];
+      let saldoIsNeg = currentSaldoStr.includes('-') || currentSaldoStr.startsWith('-');
+      let currentSaldo = parseFloat((saldoIsNeg ? '-' : '') + currentSaldoStr.replace(/[^\d,]/g, '').replace(',', '.'));
+
+      let finalAmountNum = 0;
+      let usedDifference = false;
+      if (runningBalance !== null) {
+          // O valor exato e infalível da transação é a diferença entre o saldo atual e o anterior!
+          finalAmountNum = currentSaldo - runningBalance;
+          usedDifference = true;
+      }
+      runningBalance = currentSaldo;
+
+      let isNeg = false;
+      let valNumStr = "";
+
+      if (usedDifference) {
+          isNeg = finalAmountNum < 0;
+          // Arredonda para 2 casas para evitar imprecisão de float (ex: 0.01000000009)
+          valNumStr = Math.abs(finalAmountNum).toFixed(2);
+      } else {
+          // Fallback caso o PDF não tenha SALDO ANTERIOR impresso
+          let lastLineWithValue = null;
+          for (let i = block.lines.length - 1; i >= 0; i--) {
+              if (block.lines[i].match(valueRegex)) {
+                  lastLineWithValue = block.lines[i];
+                  break;
+              }
           }
+          if (lastLineWithValue) {
+             const vals = lastLineWithValue.match(valueRegex);
+             let rawVal = vals[0];
+             isNeg = rawVal.includes('-') || rawVal.startsWith('-');
+             valNumStr = rawVal.replace(/[^\d,]/g, '').replace(',', '.');
+          }
+      }
+
+      for (const v of allValsInBlock) {
+          fullDesc = fullDesc.replace(v, '');
       }
       fullDesc = fullDesc.trim();
 
-      let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
       const upperDescForNeg = fullDesc.toUpperCase();
-      if (!isNeg) {
+      if (!isNeg && !usedDifference) {
         if (upperDescForNeg.includes('PIX DES:') || 
             upperDescForNeg.includes('PAGTO') || 
             upperDescForNeg.includes('PAGAMENTO') || 
@@ -188,7 +222,6 @@ export const parseBradesco = (text) => {
         }
       }
 
-      let valNumStr = rawVal.replace(/[^\d,]/g, '').replace(',', '.');
       let finalAmount = (isNeg ? '-' : '') + valNumStr;
 
       let checkNum = '0';
