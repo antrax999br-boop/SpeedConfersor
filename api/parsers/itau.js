@@ -45,13 +45,13 @@ export const parseItau = (text) => {
   const acctMatch = metaText.match(/(?:Agência|Ag):?\s*(\d+)\s*(?:Conta|Cta|C\/C):?\s*([\d-]+)/i);
   if (acctMatch) {
     branchId = acctMatch[1].padStart(4, '0');
-    acctId = branchId + acctMatch[2].replace(/\D/g, '');
+    acctId = branchId + acctMatch[2].replace(/\D/g, '').replace(/^0+/, '');
   } else {
     // Fallback se estiverem em linhas separadas
     const bMatch = metaText.match(/(?:Agência|Ag):?\s*(\d+)/i);
     const aMatch = metaText.match(/(?:Conta|Cta|C\/C):?\s*([\d-]+)/i);
     if (bMatch) branchId = bMatch[1].padStart(4, '0');
-    if (aMatch) acctId = (branchId || '0000') + aMatch[1].replace(/\D/g, '');
+    if (aMatch) acctId = (branchId || '0000') + aMatch[1].replace(/\D/g, '').replace(/^0+/, '');
   }
 
   // Saldo Final
