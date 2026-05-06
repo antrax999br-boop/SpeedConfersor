@@ -56,7 +56,7 @@ export const parseItau = (text) => {
 
   // Saldo Final
   // Procura por "SALDO FINAL", "SALDO DISPONÍVEL", etc.
-  const valueRegex = /(-?\d+(?:\.\d{3})*,\d{2}-?)/g;
+  const valueRegex = /[-]?\d{1,3}(?:\.\d{3})*,\d{2}-?/g;
   const balanceLines = lines.filter(l => l.toUpperCase().includes('SALDO') && l.match(valueRegex));
   if (balanceLines.length > 0) {
     const lastBalanceLine = balanceLines[balanceLines.length - 1];
@@ -84,7 +84,6 @@ export const parseItau = (text) => {
   if (yearMatch) currentYear = yearMatch[1];
 
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4})?)/;
-  const valueRegex = /[-]?\d{1,3}(?:\.\d{3})*,\d{2}-?/g;
   
   let currentTrn = null;
   let expectedTxCount = 0;
