@@ -84,17 +84,35 @@ export const parseItau = (text) => {
   if (yearMatch) currentYear = yearMatch[1];
 
   const dateRegex = /^(\d{2}\/\d{2}(?:\/\d{4})?)/;
+  const valueRegex = /[-]?\d{1,3}(?:\.\d{3})*,\d{2}-?/g;
+  
   let currentTrn = null;
+  let expectedTxCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
+    const upperLine = line.toUpperCase();
+    
+    // Ignorar linhas de Saldo e cabeçalhos inúteis
+    if (upperLine.includes('SALDO ANTERIOR') || 
+        upperLine.includes('SALDO DO DIA') || 
+        upperLine.includes('SALDO FINAL') ||
+        upperLine.includes('SALDOS POR') ||
+        upperLine.includes('SALDO BLOQUEADO') ||
+        (upperLine.includes('EXTRATO') && !line.match(valueRegex)) ||
+        (upperLine.includes('PÁGINA') && !line.match(valueRegex)) ||
+        upperLine.includes('RENDIMENTOS SUJEITOS')) {
+      continue;
+    }
+
     const dateMatch = line.match(dateRegex);
     const hasValue = line.match(valueRegex);
 
     if (dateMatch && hasValue) {
-      // Nova Transação
+      // Inicia novo bloco de transação
+      expectedTxCount++;
       if (currentTrn) transactions.push(currentTrn);
 
       let rawDate = dateMatch[1];
@@ -102,20 +120,14 @@ export const parseItau = (text) => {
       const dp = rawDate.split('/');
       const formattedDate = `${dp[2]}${dp[1]}${dp[0]}`;
 
+      // Extrair o valor (pegamos o primeiro que casar na linha da transação)
       const vals = line.match(valueRegex);
       let rawVal = vals[0];
       let isNeg = rawVal.includes('-') || rawVal.startsWith('-');
       let cleanVal = rawVal.replace(/\D/g, '');
       let numVal = (isNeg ? -1 : 1) * (parseFloat(cleanVal) / 100);
 
-      // Ignorar Saldo Anterior/Dia
-      const upLine = line.toUpperCase();
-      if (upLine.includes('SALDO') && (upLine.includes('ANTERIOR') || upLine.includes('DIA') || upLine.includes('FINAL'))) {
-        currentTrn = null;
-        continue;
-      }
-
-      // Descrição inicial
+      // Limpar a data e o valor da linha para iniciar a descrição
       let desc = line.replace(dateMatch[0], '').replace(rawVal, '').trim();
 
       currentTrn = {
@@ -124,23 +136,23 @@ export const parseItau = (text) => {
         rawDesc: desc,
         lines: [line]
       };
-    } else if (currentTrn && line.length > 2 && !line.match(dateRegex)) {
-      // Linha de continuação
-      // Se não tem data e não é uma linha de sistema, adiciona à descrição
-      const upLine = line.toUpperCase();
-      if (!upLine.includes('EXTRATO') && !upLine.includes('PÁGINA') && !upLine.includes('ITAU')) {
-        currentTrn.rawDesc += ' ' + line;
-        currentTrn.lines.push(line);
-      }
-    } else if (currentTrn && hasValue && !dateMatch) {
-       // Se achou valor sem data, pode ser o fim da transação ou lixo
-       // No Itaú, geralmente cada transação tem sua data.
+    } else if (currentTrn) {
+      // Continuação do bloco (linhas seguintes sem nova data+valor)
+      currentTrn.rawDesc += ' ' + line;
+      currentTrn.lines.push(line);
     }
   }
+  
   if (currentTrn) transactions.push(currentTrn);
+
+  // 5. GARANTIA DE CAPTURA TOTAL
+  if (transactions.length !== expectedTxCount) {
+    throw new Error(`Falha de validação: transações incompletas. Esperado: ${expectedTxCount}, Gerado: ${transactions.length}`);
+  }
 
   // Processamento Final das Transações
   const processedTransactions = transactions.map((t, idx) => {
+    // MEMO COMPLETO (remover espaços múltiplos, manter tudo)
     const fullDesc = t.rawDesc.replace(/\s+/g, ' ').trim();
     const type = getTrnType(fullDesc) || (parseFloat(t.amount) < 0 ? 'DEBIT' : 'CREDIT');
     
@@ -148,13 +160,13 @@ export const parseItau = (text) => {
     let name = '';
     const upperDesc = fullDesc.toUpperCase();
     if (upperDesc.includes('PIX')) name = 'PIX ' + (parseFloat(t.amount) < 0 ? 'ENVIADO' : 'RECEBIDO');
-    else if (upperDesc.includes('PAGTO') || upperDesc.includes('PAGAMENTO')) name = 'PAGAMENTO';
-    else if (upperDesc.includes('TARIFA')) name = 'TARIFA';
+    else if (upperDesc.includes('PAGAMENTO') || upperDesc.includes('PAGTO') || upperDesc.includes('PAG ')) name = 'PAGAMENTO';
+    else if (upperDesc.includes('TARIFA') || upperDesc.includes('JUROS')) name = 'TARIFA';
     else name = fullDesc.substring(0, 32).split(' ')[0] + ' ' + (fullDesc.split(' ')[1] || '');
 
     if (!name.trim()) name = 'TRANSACAO';
 
-    // FITID: data + valor (sem ponto/sinal) + index
+    // FITID: data + valor (sem ponto/sinal) + index (garantia de unicidade)
     const cleanAmt = t.amount.replace(/\D/g, '');
     const fitid = `${t.date}${cleanAmt}${idx + 1}`;
 
@@ -163,7 +175,7 @@ export const parseItau = (text) => {
       amount: t.amount,
       type: type,
       name: name.substring(0, 32).toUpperCase().trim(),
-      memo: fullDesc.toUpperCase().trim(),
+      memo: fullDesc.toUpperCase().trim(), // Descrição com todas as linhas concatenadas
       id: fitid
     };
   });
