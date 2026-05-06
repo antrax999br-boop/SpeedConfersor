@@ -197,9 +197,11 @@ export const parseBradesco = (text) => {
     const fullDesc = t.rawDesc.replace(/\s+/g, ' ').trim();
     const type = t.amount.startsWith('-') ? 'DEBIT' : 'CREDIT';
     
-    // FITID no padrão Bradesco (N + sequência única hexadecimal)
-    const baseHex = 65800; 
-    const fitid = 'N' + (baseHex + idx).toString(16).toUpperCase();
+    let fitid = t.checkNum;
+    if (!fitid || fitid === '0') {
+      const baseHex = 65800; 
+      fitid = 'N' + (baseHex + idx).toString(16).toUpperCase();
+    }
 
     return {
       date: t.date + '120000',
@@ -207,7 +209,7 @@ export const parseBradesco = (text) => {
       type: type,
       memo: fullDesc.toUpperCase(),
       id: fitid,
-      checkNum: t.checkNum
+      checkNum: t.checkNum !== '0' ? t.checkNum : ''
     };
   });
 
@@ -232,7 +234,7 @@ export const parseBradesco = (text) => {
 };
 
 export const bankConfig = {
-  bankId: '0237',
+  bankId: '237',
   bankName: 'Banco Bradesco S.A.'
 };
 
@@ -249,65 +251,68 @@ export const convertToOFX = (text) => {
   ofx += `OLDFILEUID:NONE\r\n`;
   ofx += `NEWFILEUID:NONE\r\n\r\n`;
 
-  ofx += `<OFX>\r\n`;
+  ofx += `<OFX>\r\n\r\n`;
+
   ofx += `<SIGNONMSGSRSV1>\r\n`;
-  ofx += `<SONRS>\r\n`;
-  ofx += `<STATUS>\r\n`;
-  ofx += `<CODE>0\r\n`;
-  ofx += `<SEVERITY>INFO\r\n`;
-  ofx += `</STATUS>\r\n`;
-  ofx += `<DTSERVER>00000000000000\r\n`;
-  ofx += `<LANGUAGE>POR\r\n`;
-  ofx += `</SONRS>\r\n`;
-  ofx += `</SIGNONMSGSRSV1>\r\n`;
+  ofx += ` <SONRS>\r\n`;
+  ofx += `  <STATUS>\r\n`;
+  ofx += `   <CODE>0\r\n`;
+  ofx += `   <SEVERITY>INFO\r\n`;
+  ofx += `  </STATUS>\r\n`;
+  ofx += `  <DTSERVER>${new Date().toISOString().slice(0, 10).replace(/-/g, '')}120000\r\n`;
+  ofx += `  <LANGUAGE>POR\r\n`;
+  ofx += ` </SONRS>\r\n`;
+  ofx += `</SIGNONMSGSRSV1>\r\n\r\n`;
 
   ofx += `<BANKMSGSRSV1>\r\n`;
-  ofx += `<STMTTRNRS>\r\n`;
-  ofx += `<TRNUID>1001\r\n`;
-  ofx += `<STATUS>\r\n`;
-  ofx += `<CODE>0\r\n`;
-  ofx += `<SEVERITY>INFO\r\n`;
-  ofx += `</STATUS>\r\n`;
+  ofx += ` <STMTTRNRS>\r\n`;
+  ofx += `  <TRNUID>1\r\n`;
+  ofx += `  <STATUS>\r\n`;
+  ofx += `   <CODE>0\r\n`;
+  ofx += `   <SEVERITY>INFO\r\n`;
+  ofx += `  </STATUS>\r\n\r\n`;
   
-  ofx += `<STMTRS>\r\n`;
-  ofx += `<CURDEF>BRL\r\n`;
+  ofx += `  <STMTRS>\r\n`;
+  ofx += `   <CURDEF>BRL\r\n\r\n`;
   
-  ofx += `<BANKACCTFROM>\r\n`;
-  ofx += `<BANKID>0237\r\n`;
-  ofx += `<ACCTID>${bankInfo.acctId}\r\n`;
-  ofx += `<ACCTTYPE>CHECKING\r\n`;
-  ofx += `</BANKACCTFROM>\r\n`;
+  ofx += `   <BANKACCTFROM>\r\n`;
+  ofx += `    <BANKID>237\r\n`;
+  ofx += `    <ACCTID>${bankInfo.acctId}\r\n`;
+  ofx += `    <ACCTTYPE>CHECKING\r\n`;
+  ofx += `   </BANKACCTFROM>\r\n\r\n`;
   
-  ofx += `<BANKTRANLIST>\r\n`;
-  ofx += `<DTSTART>${bankInfo.dtStart}\r\n`;
-  ofx += `<DTEND>${bankInfo.dtEnd}\r\n`;
+  ofx += `   <BANKTRANLIST>\r\n`;
+  ofx += `    <DTSTART>${bankInfo.dtStart}\r\n`;
+  ofx += `    <DTEND>${bankInfo.dtEnd}\r\n\r\n`;
 
   for (const t of transactions) {
     ofx += `<STMTTRN>\r\n`;
-    ofx += `<TRNTYPE>${t.type}\r\n`;
-    ofx += `<DTPOSTED>${t.date}\r\n`;
-    ofx += `<TRNAMT>${t.amount}\r\n`; // VALOR COM VÍRGULA
-    ofx += `<FITID>${t.id}\r\n`;
-    ofx += `<CHECKNUM>${t.checkNum}\r\n`;
-    ofx += `<MEMO>${t.memo}\r\n`;
-    ofx += `</STMTTRN>\r\n`;
+    ofx += ` <TRNTYPE>${t.type}\r\n`;
+    ofx += ` <DTPOSTED>${t.date}\r\n`;
+    ofx += ` <TRNAMT>${t.amount}\r\n`;
+    ofx += ` <FITID>${t.id}\r\n`;
+    if (t.checkNum) {
+      ofx += ` <CHECKNUM>${t.checkNum}\r\n`;
+    }
+    ofx += ` <MEMO>${t.memo}\r\n`;
+    ofx += `</STMTTRN>\r\n\r\n`;
   }
 
-  ofx += `</BANKTRANLIST>\r\n`;
+  ofx += `   </BANKTRANLIST>\r\n\r\n`;
   
-  ofx += `<LEDGERBAL>\r\n`;
-  ofx += `<BALAMT>${bankInfo.finalBalance}\r\n`; // VALOR COM VÍRGULA
-  ofx += `<DTASOF>${bankInfo.balanceDate}\r\n`;
-  ofx += `</LEDGERBAL>\r\n`;
+  ofx += `   <LEDGERBAL>\r\n`;
+  ofx += `    <BALAMT>${bankInfo.finalBalance}\r\n`;
+  ofx += `    <DTASOF>${bankInfo.balanceDate}\r\n`;
+  ofx += `   </LEDGERBAL>\r\n\r\n`;
   
-  ofx += `<AVAILBAL>\r\n`;
-  ofx += `<BALAMT>${bankInfo.finalBalance}\r\n`; // VALOR COM VÍRGULA
-  ofx += `<DTASOF>${bankInfo.balanceDate}\r\n`;
-  ofx += `</AVAILBAL>\r\n`;
+  ofx += `   <AVAILBAL>\r\n`;
+  ofx += `    <BALAMT>${bankInfo.finalBalance}\r\n`;
+  ofx += `    <DTASOF>${bankInfo.balanceDate}\r\n`;
+  ofx += `   </AVAILBAL>\r\n\r\n`;
   
-  ofx += `</STMTRS>\r\n`;
-  ofx += `</STMTTRNRS>\r\n`;
-  ofx += `</BANKMSGSRSV1>\r\n`;
+  ofx += `  </STMTRS>\r\n`;
+  ofx += ` </STMTTRNRS>\r\n`;
+  ofx += `</BANKMSGSRSV1>\r\n\r\n`;
   ofx += `</OFX>\r\n`;
 
   return ofx;
